@@ -3,9 +3,7 @@ use inkwell::{
     context::Context,
     module::Module,
     types::BasicTypeEnum,
-    values::{
-        PointerValue,
-    },
+    values::PointerValue,
     AddressSpace,
     OptimizationLevel,
 };
@@ -13,8 +11,11 @@ use inkwell::{
 use crate::{
     expr::Closure,
     jit::CompiledClosure,
-    types::{CompileType, TypeInfo},
     lowering::Lowering,
+    types::{
+        CompileType,
+        TypeInfo,
+    },
 };
 
 
@@ -23,15 +24,20 @@ use crate::{
 // ============================================================
 
 pub struct Compiler<'ctx> {
-    pub(crate) context: &'ctx Context,
+    pub(crate) context:
+        &'ctx Context,
 }
+
 
 impl<'ctx> Compiler<'ctx> {
     pub fn new(
         context: &'ctx Context,
     ) -> Self {
-        Self { context }
+        Self {
+            context,
+        }
     }
+
 
     pub fn compile<Args, Ret>(
         &self,
@@ -44,13 +50,19 @@ impl<'ctx> Compiler<'ctx> {
         Args: CompileType,
         Ret: CompileType + 'static,
     {
-        let context = self.context;
+        let context =
+            self.context;
+
 
         let module =
-            context.create_module("closure_module");
+            context.create_module(
+                "closure_module"
+            );
+
 
         let function_name =
             "compiled_closure";
+
 
         self.generate_function(
             context,
@@ -59,10 +71,14 @@ impl<'ctx> Compiler<'ctx> {
             closure,
         )?;
 
+
         println!(
             "Generated LLVM IR:\n{}",
-            module.print_to_string().to_string()
+            module
+                .print_to_string()
+                .to_string()
         );
+
 
         let engine =
             module
@@ -75,6 +91,7 @@ impl<'ctx> Compiler<'ctx> {
                         error
                     )
                 })?;
+
 
         Ok(
             CompiledClosure::new(
@@ -96,22 +113,41 @@ impl<'ctx> Compiler<'ctx> {
         function_name: &str,
         closure: &Closure,
     ) -> Result<(), String> {
-        let return_type =
-            llvm_type(
-                context,
-                &closure.return_type,
-            )?;
-
         let argument_pointer_type =
             context.ptr_type(
                 AddressSpace::default(),
             );
 
-        let function_type =
-            basic_type_fn_type(
-                return_type,
-                argument_pointer_type,
+
+        let result_pointer_type =
+            context.ptr_type(
+                AddressSpace::default(),
             );
+
+
+        // ----------------------------------------------------
+        // IMPORTANT:
+        //
+        // The function now returns void and receives the result
+        // as a pointer.
+        //
+        //     void compiled_closure(
+        //         ptr args,
+        //         ptr result
+        //     )
+        // ----------------------------------------------------
+
+        let function_type =
+            context
+                .void_type()
+                .fn_type(
+                    &[
+                        argument_pointer_type.into(),
+                        result_pointer_type.into(),
+                    ],
+                    false,
+                );
+
 
         let function =
             module.add_function(
@@ -120,16 +156,26 @@ impl<'ctx> Compiler<'ctx> {
                 None,
             );
 
+
         let entry =
             context.append_basic_block(
                 function,
                 "entry",
             );
 
+
         let builder =
             context.create_builder();
 
-        builder.position_at_end(entry);
+
+        builder.position_at_end(
+            entry
+        );
+
+
+        // ====================================================
+        // Arguments pointer
+        // ====================================================
 
         let argument_pointer =
             function
@@ -140,6 +186,25 @@ impl<'ctx> Compiler<'ctx> {
                 })?
                 .into_pointer_value();
 
+
+        // ====================================================
+        // Result pointer
+        // ====================================================
+
+        let result_pointer =
+            function
+                .get_nth_param(1)
+                .ok_or_else(|| {
+                    "missing result pointer"
+                        .to_string()
+                })?
+                .into_pointer_value();
+
+
+        // ====================================================
+        // Build argument pointers
+        // ====================================================
+
         let arguments =
             self.build_argument_pointers(
                 context,
@@ -148,8 +213,14 @@ impl<'ctx> Compiler<'ctx> {
                 &closure.arguments,
             )?;
 
+
+        // ====================================================
+        // Lower expression
+        // ====================================================
+
         let lowering =
             Lowering;
+
 
         let value =
             lowering.lower_expr(
@@ -162,6 +233,7 @@ impl<'ctx> Compiler<'ctx> {
                 &closure.body,
             )?;
 
+
         let value =
             lowering.materialize_value(
                 context,
@@ -169,14 +241,37 @@ impl<'ctx> Compiler<'ctx> {
                 value,
             )?;
 
+
+        // ====================================================
+        // Store result
+        // ====================================================
+
         builder
-            .build_return(Some(&value))
+            .build_store(
+                result_pointer,
+                value,
+            )
+            .map_err(|error| {
+                format!(
+                    "failed to store return value: {:?}",
+                    error
+                )
+            })?;
+
+
+        // ====================================================
+        // Return void
+        // ====================================================
+
+        builder
+            .build_return(None)
             .map_err(|error| {
                 format!(
                     "failed to build return: {:?}",
                     error
                 )
             })?;
+
 
         if function.verify(true) {
             Ok(())
@@ -207,6 +302,7 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(Vec::new());
         }
 
+
         let field_types =
             argument_types
                 .iter()
@@ -216,7 +312,11 @@ impl<'ctx> Compiler<'ctx> {
                         type_info,
                     )
                 })
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<Result<
+                    Vec<_>,
+                    _,
+                >>()?;
+
 
         let tuple_type =
             context.struct_type(
@@ -224,19 +324,26 @@ impl<'ctx> Compiler<'ctx> {
                 false,
             );
 
+
         let mut result =
             Vec::with_capacity(
                 argument_types.len()
             );
 
-        for index in 0..argument_types.len() {
+
+        for index
+            in 0..argument_types.len()
+        {
             let pointer =
                 builder
                     .build_struct_gep(
                         tuple_type,
                         argument_pointer,
                         index as u32,
-                        &format!("arg{}_ptr", index),
+                        &format!(
+                            "arg{}_ptr",
+                            index
+                        ),
                     )
                     .map_err(|error| {
                         format!(
@@ -246,65 +353,12 @@ impl<'ctx> Compiler<'ctx> {
                         )
                     })?;
 
+
             result.push(pointer);
         }
 
+
         Ok(result)
-    }
-}
-
-
-// ============================================================
-// Function type helper
-// ============================================================
-
-fn basic_type_fn_type<'ctx>(
-    return_type: BasicTypeEnum<'ctx>,
-    argument_pointer_type:
-        inkwell::types::PointerType<'ctx>,
-) -> inkwell::types::FunctionType<'ctx> {
-    match return_type {
-        BasicTypeEnum::ArrayType(ty) =>
-            ty.fn_type(
-                &[argument_pointer_type.into()],
-                false,
-            ),
-
-        BasicTypeEnum::FloatType(ty) =>
-            ty.fn_type(
-                &[argument_pointer_type.into()],
-                false,
-            ),
-
-        BasicTypeEnum::IntType(ty) =>
-            ty.fn_type(
-                &[argument_pointer_type.into()],
-                false,
-            ),
-
-        BasicTypeEnum::PointerType(ty) =>
-            ty.fn_type(
-                &[argument_pointer_type.into()],
-                false,
-            ),
-
-        BasicTypeEnum::StructType(ty) =>
-            ty.fn_type(
-                &[argument_pointer_type.into()],
-                false,
-            ),
-
-        BasicTypeEnum::VectorType(ty) =>
-            ty.fn_type(
-                &[argument_pointer_type.into()],
-                false,
-            ),
-
-        BasicTypeEnum::ScalableVectorType(ty) =>
-            ty.fn_type(
-                &[argument_pointer_type.into()],
-                false,
-            ),
     }
 }
 
@@ -316,31 +370,71 @@ fn basic_type_fn_type<'ctx>(
 pub(crate) fn llvm_type<'ctx>(
     context: &'ctx Context,
     type_info: &TypeInfo,
-) -> Result<BasicTypeEnum<'ctx>, String> {
+) -> Result<
+    BasicTypeEnum<'ctx>,
+    String,
+> {
     match type_info {
         TypeInfo::F32 =>
-            Ok(context.f32_type().into()),
+            Ok(
+                context
+                    .f32_type()
+                    .into()
+            ),
 
         TypeInfo::F64 =>
-            Ok(context.f64_type().into()),
+            Ok(
+                context
+                    .f64_type()
+                    .into()
+            ),
 
-        TypeInfo::I8 | TypeInfo::U8 =>
-            Ok(context.i8_type().into()),
+        TypeInfo::I8
+        | TypeInfo::U8 =>
+            Ok(
+                context
+                    .i8_type()
+                    .into()
+            ),
 
-        TypeInfo::I16 | TypeInfo::U16 =>
-            Ok(context.i16_type().into()),
+        TypeInfo::I16
+        | TypeInfo::U16 =>
+            Ok(
+                context
+                    .i16_type()
+                    .into()
+            ),
 
-        TypeInfo::I32 | TypeInfo::U32 =>
-            Ok(context.i32_type().into()),
+        TypeInfo::I32
+        | TypeInfo::U32 =>
+            Ok(
+                context
+                    .i32_type()
+                    .into()
+            ),
 
-        TypeInfo::I64 | TypeInfo::U64 =>
-            Ok(context.i64_type().into()),
+        TypeInfo::I64
+        | TypeInfo::U64 =>
+            Ok(
+                context
+                    .i64_type()
+                    .into()
+            ),
 
-        TypeInfo::I128 | TypeInfo::U128 =>
-            Ok(context.i128_type().into()),
+        TypeInfo::I128
+        | TypeInfo::U128 =>
+            Ok(
+                context
+                    .i128_type()
+                    .into()
+            ),
 
         TypeInfo::Bool =>
-            Ok(context.bool_type().into()),
+            Ok(
+                context
+                    .bool_type()
+                    .into()
+            ),
 
         TypeInfo::Struct {
             fields,
@@ -355,7 +449,11 @@ pub(crate) fn llvm_type<'ctx>(
                             &field.type_info,
                         )
                     })
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<Result<
+                        Vec<_>,
+                        _,
+                    >>()?;
+
 
             Ok(
                 context

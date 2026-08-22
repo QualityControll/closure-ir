@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use std::mem::MaybeUninit;
 
 use inkwell::{
     execution_engine::ExecutionEngine,
@@ -15,8 +16,10 @@ pub struct CompiledClosure<'ctx, Args, Ret> {
     pub(crate) engine: ExecutionEngine<'ctx>,
     pub(crate) function_name: String,
 
-    pub(crate) _marker: PhantomData<fn(Args) -> Ret>,
+    pub(crate) _marker:
+        PhantomData<fn(Args) -> Ret>,
 }
+
 
 impl<'ctx, Args, Ret> CompiledClosure<'ctx, Args, Ret>
 where
@@ -30,9 +33,11 @@ where
         Self {
             engine,
             function_name,
-            _marker: PhantomData,
+            _marker:
+                PhantomData,
         }
     }
+
 
     pub unsafe fn call(
         &self,
@@ -49,6 +54,33 @@ where
 
 // ============================================================
 // JIT invocation
+//
+// IMPORTANT:
+//
+// We intentionally do NOT return Ret directly from the JIT
+// function.
+//
+// Returning an LLVM struct directly and asking Rust to interpret
+// that return value as an arbitrary Rust tuple/struct can result
+// in an ABI mismatch.
+//
+// Instead:
+//
+//     LLVM:
+//         fn(args_ptr, result_ptr) -> void
+//
+//     Rust:
+//         allocate MaybeUninit<Ret>
+//         pass pointer to LLVM
+//         read result
+//
+// This makes aggregate return values such as:
+//
+//     (i32, i32)
+//     (i32, i64)
+//     (f32, f64, i32)
+//
+// work without relying on aggregate return ABI compatibility.
 // ============================================================
 
 unsafe fn jit_call<Args, Ret>(
@@ -60,15 +92,32 @@ where
     Args: CompileType,
     Ret: CompileType + 'static,
 {
-    type JitFn<Ret> =
-        unsafe extern "C" fn(*const u8) -> Ret;
+    type JitFn =
+        unsafe extern "C" fn(
+            *const u8,
+            *mut u8,
+        );
+
 
     let function =
         engine
-            .get_function::<JitFn<Ret>>(function_name)
-            .expect("failed to get JIT function");
+            .get_function::<JitFn>(
+                function_name,
+            )
+            .expect(
+                "failed to get JIT function"
+            );
+
+
+    let mut result =
+        MaybeUninit::<Ret>::uninit();
+
 
     function.call(
-        value as *const Args as *const u8
-    )
+        value as *const Args as *const u8,
+        result.as_mut_ptr() as *mut u8,
+    );
+
+
+    result.assume_init()
 }

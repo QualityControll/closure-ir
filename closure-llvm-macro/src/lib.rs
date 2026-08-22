@@ -16,6 +16,7 @@ use syn::{
     ExprIf,
     ExprLit,
     ExprPath,
+    ExprTuple,
 
     Fields,
     Lit,
@@ -691,6 +692,29 @@ fn lower_expr(
                 expected_type,
             ),
 
+        // ----------------------------------------------------
+        // Tuple expressions
+        //
+        // Example:
+        //
+        //     (x, y)
+        //
+        // becomes:
+        //
+        //     Expr::Tuple {
+        //         elements: vec![
+        //             Expr::Argument(0),
+        //             Expr::Argument(1),
+        //         ]
+        //     }
+        // ----------------------------------------------------
+
+        SynExpr::Tuple(tuple) =>
+            lower_tuple(
+                tuple,
+                arguments,
+            ),
+
         SynExpr::Field(field) =>
             lower_field(
                 field,
@@ -787,18 +811,6 @@ fn lower_literal(
 
             match suffix {
                 "" => {
-                    // ------------------------------------------------
-                    // Unsuffixed integer:
-                    //
-                    // Use the surrounding expression's expected type
-                    // when available. This gives us Rust-like
-                    // contextual typing for expressions such as:
-                    //
-                    //     a + 5
-                    //
-                    // where a: i8.
-                    // ------------------------------------------------
-
                     if let Some(ty) = expected_type {
                         lower_integer_with_type(
                             value,
@@ -1293,19 +1305,6 @@ fn lower_binary(
     arguments: &[ClosureArgument],
     expected_type: Option<&Type>,
 ) -> syn::Result<proc_macro2::TokenStream> {
-    // --------------------------------------------------------
-    // Determine the operand type.
-    //
-    // For:
-    //
-    //     a + 5
-    //
-    // `a` tells us that `5` should have the same type as `a`.
-    //
-    // We first look at the left operand, then the right operand,
-    // and finally fall back to the expected result type.
-    // --------------------------------------------------------
-
     let operand_type =
         expression_type(
             &binary.left,
@@ -1580,6 +1579,41 @@ fn lower_if(
 
                 else_branch:
                     Box::new(#else_branch),
+            }
+        }
+    )
+}
+
+
+// ============================================================
+// Tuple
+// ============================================================
+
+fn lower_tuple(
+    tuple: &ExprTuple,
+    arguments: &[ClosureArgument],
+) -> syn::Result<proc_macro2::TokenStream> {
+    let elements =
+        tuple
+            .elems
+            .iter()
+            .map(|element| {
+                lower_expr(
+                    element,
+                    arguments,
+                    None,
+                )
+            })
+            .collect::<syn::Result<Vec<_>>>()?;
+
+    Ok(
+        quote! {
+            ::closure_llvm::Expr::Tuple {
+                elements: vec![
+                    #(
+                        #elements
+                    ),*
+                ],
             }
         }
     )

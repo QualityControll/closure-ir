@@ -17,6 +17,10 @@ pub enum Expr {
         name: String,
     },
 
+    Tuple {
+        elements: Vec<Expr>
+    },
+
     Add {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
