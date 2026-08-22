@@ -422,6 +422,19 @@ pub enum Expr {
     Neg {
         operand: Box<Expr>,
     },
+
+    // --------------------------------------------------------
+    // Conditional expression
+    //
+    // IMPORTANT:
+    // These field names must match the proc macro exactly.
+    // --------------------------------------------------------
+
+    IfElse {
+        condition: Box<Expr>,
+        then_branch: Box<Expr>,
+        else_branch: Box<Expr>,
+    },
 }
 
 
@@ -692,8 +705,10 @@ impl<'ctx> Compiler<'ctx> {
         let value =
             self.lower_expr(
                 &builder,
+                function,
                 &arguments,
                 &closure.arguments,
+                &closure.return_type,
                 &closure.body,
             )?;
 
@@ -730,8 +745,10 @@ impl<'ctx> Compiler<'ctx> {
     fn lower_expr(
         &self,
         builder: &Builder<'ctx>,
+        function: inkwell::values::FunctionValue<'ctx>,
         arguments: &[PointerValue<'ctx>],
         argument_types: &[TypeInfo],
+        expected_type: &TypeInfo,
         expr: &Expr,
     ) -> Result<LoweredValue<'ctx>, String> {
         match expr {
@@ -775,8 +792,10 @@ impl<'ctx> Compiler<'ctx> {
                 let object =
                     self.lower_expr(
                         builder,
+                        function,
                         arguments,
                         argument_types,
+                        expected_type,
                         object,
                     )?;
 
@@ -879,11 +898,34 @@ impl<'ctx> Compiler<'ctx> {
                 )
             }
 
+            // ------------------------------------------------
+            // If / else
+            // ------------------------------------------------
+
+            Expr::IfElse {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                self.lower_if_else(
+                    builder,
+                    function,
+                    arguments,
+                    argument_types,
+                    expected_type,
+                    condition,
+                    then_branch,
+                    else_branch,
+                )
+            }
+
             Expr::Add { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::Add,
@@ -892,8 +934,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::Sub { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::Sub,
@@ -902,8 +946,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::Mul { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::Mul,
@@ -912,8 +958,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::Div { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::Div,
@@ -922,8 +970,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::Rem { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::Rem,
@@ -932,8 +982,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::Eq { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::Eq,
@@ -942,8 +994,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::Ne { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::Ne,
@@ -952,8 +1006,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::Lt { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::Lt,
@@ -962,8 +1018,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::Le { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::Le,
@@ -972,8 +1030,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::Gt { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::Gt,
@@ -982,8 +1042,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::Ge { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::Ge,
@@ -992,8 +1054,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::And { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::And,
@@ -1002,8 +1066,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::Or { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::Or,
@@ -1012,8 +1078,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::BitAnd { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::BitAnd,
@@ -1022,8 +1090,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::BitOr { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::BitOr,
@@ -1032,8 +1102,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::BitXor { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::BitXor,
@@ -1042,8 +1114,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::Shl { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::Shl,
@@ -1052,8 +1126,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::Shr { lhs, rhs } =>
                 self.lower_binary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     lhs,
                     rhs,
                     BinaryOp::Shr,
@@ -1062,8 +1138,10 @@ impl<'ctx> Compiler<'ctx> {
             Expr::Not { operand } =>
                 self.lower_unary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     operand,
                     UnaryOp::Not,
                 ),
@@ -1071,12 +1149,215 @@ impl<'ctx> Compiler<'ctx> {
             Expr::Neg { operand } =>
                 self.lower_unary(
                     builder,
+                    function,
                     arguments,
                     argument_types,
+                    expected_type,
                     operand,
                     UnaryOp::Neg,
                 ),
         }
+    }
+
+
+    // --------------------------------------------------------
+    // If / else lowering
+    // --------------------------------------------------------
+
+    fn lower_if_else(
+        &self,
+        builder: &Builder<'ctx>,
+        function: inkwell::values::FunctionValue<'ctx>,
+        arguments: &[PointerValue<'ctx>],
+        argument_types: &[TypeInfo],
+        expected_type: &TypeInfo,
+        condition: &Expr,
+        then_branch: &Expr,
+        else_branch: &Expr,
+    ) -> Result<LoweredValue<'ctx>, String> {
+        let condition =
+            self.lower_expr(
+                builder,
+                function,
+                arguments,
+                argument_types,
+                &TypeInfo::Bool,
+                condition,
+            )?;
+
+        let condition =
+            self.materialize_value(
+                builder,
+                condition,
+            )?;
+
+        let condition =
+            match condition {
+                BasicValueEnum::IntValue(value) => value,
+
+                _ => {
+                    return Err(
+                        "if condition must be a boolean/integer value"
+                            .to_string()
+                    );
+                }
+            };
+
+        let then_block =
+            self.context.append_basic_block(
+                function,
+                "then",
+            );
+
+        let else_block =
+            self.context.append_basic_block(
+                function,
+                "else",
+            );
+
+        let merge_block =
+            self.context.append_basic_block(
+                function,
+                "if_merge",
+            );
+
+        builder
+            .build_conditional_branch(
+                condition,
+                then_block,
+                else_block,
+            )
+            .map_err(|error| {
+                format!(
+                    "failed to build conditional branch: {:?}",
+                    error
+                )
+            })?;
+
+        // ----------------------------------------------------
+        // Then
+        // ----------------------------------------------------
+
+        builder.position_at_end(then_block);
+
+        let then_value =
+            self.lower_expr(
+                builder,
+                function,
+                arguments,
+                argument_types,
+                expected_type,
+                then_branch,
+            )?;
+
+        let then_value =
+            self.materialize_value(
+                builder,
+                then_value,
+            )?;
+
+        let then_end =
+            builder
+                .get_insert_block()
+                .ok_or_else(|| {
+                    "missing then block"
+                        .to_string()
+                })?;
+
+        if then_end.get_terminator().is_none() {
+            builder
+                .build_unconditional_branch(
+                    merge_block,
+                )
+                .map_err(|error| {
+                    format!(
+                        "failed to branch from then block: {:?}",
+                        error
+                    )
+                })?;
+        }
+
+        // ----------------------------------------------------
+        // Else
+        // ----------------------------------------------------
+
+        builder.position_at_end(else_block);
+
+        let else_value =
+            self.lower_expr(
+                builder,
+                function,
+                arguments,
+                argument_types,
+                expected_type,
+                else_branch,
+            )?;
+
+        let else_value =
+            self.materialize_value(
+                builder,
+                else_value,
+            )?;
+
+        let else_end =
+            builder
+                .get_insert_block()
+                .ok_or_else(|| {
+                    "missing else block"
+                        .to_string()
+                })?;
+
+        if else_end.get_terminator().is_none() {
+            builder
+                .build_unconditional_branch(
+                    merge_block,
+                )
+                .map_err(|error| {
+                    format!(
+                        "failed to branch from else block: {:?}",
+                        error
+                    )
+                })?;
+        }
+
+        // ----------------------------------------------------
+        // Merge
+        // ----------------------------------------------------
+
+        builder.position_at_end(merge_block);
+
+        let phi =
+            builder
+                .build_phi(
+                    expected_type_llvm_type(
+                        self.context,
+                        expected_type,
+                    )?,
+                    "if_result",
+                )
+                .map_err(|error| {
+                    format!(
+                        "failed to build if/else PHI: {:?}",
+                        error
+                    )
+                })?;
+
+        phi.add_incoming(&[
+            (
+                &then_value,
+                then_end,
+            ),
+            (
+                &else_value,
+                else_end,
+            ),
+        ]);
+
+        Ok(
+            LoweredValue::Value(
+                phi.as_basic_value()
+            )
+        )
     }
 
 
@@ -1219,16 +1500,20 @@ impl<'ctx> Compiler<'ctx> {
     fn lower_unary(
         &self,
         builder: &Builder<'ctx>,
+        function: inkwell::values::FunctionValue<'ctx>,
         arguments: &[PointerValue<'ctx>],
         argument_types: &[TypeInfo],
+        expected_type: &TypeInfo,
         operand: &Expr,
         operation: UnaryOp,
     ) -> Result<LoweredValue<'ctx>, String> {
         let operand =
             self.lower_expr(
                 builder,
+                function,
                 arguments,
                 argument_types,
+                expected_type,
                 operand,
             )?;
 
@@ -1325,17 +1610,41 @@ impl<'ctx> Compiler<'ctx> {
     fn lower_binary(
         &self,
         builder: &Builder<'ctx>,
+        function: inkwell::values::FunctionValue<'ctx>,
         arguments: &[PointerValue<'ctx>],
         argument_types: &[TypeInfo],
+        expected_type: &TypeInfo,
         lhs: &Expr,
         rhs: &Expr,
         operation: BinaryOp,
     ) -> Result<LoweredValue<'ctx>, String> {
+        let operand_type =
+            match operation {
+                BinaryOp::Eq
+                | BinaryOp::Ne
+                | BinaryOp::Lt
+                | BinaryOp::Le
+                | BinaryOp::Gt
+                | BinaryOp::Ge
+                | BinaryOp::And
+                | BinaryOp::Or => {
+                    infer_expression_type(
+                        argument_types,
+                        lhs,
+                        expected_type,
+                    )
+                }
+
+                _ => expected_type.clone(),
+            };
+
         let lhs =
             self.lower_expr(
                 builder,
+                function,
                 arguments,
                 argument_types,
+                &operand_type,
                 lhs,
             )?;
 
@@ -1348,8 +1657,10 @@ impl<'ctx> Compiler<'ctx> {
         let rhs =
             self.lower_expr(
                 builder,
+                function,
                 arguments,
                 argument_types,
+                &operand_type,
                 rhs,
             )?;
 
@@ -1381,8 +1692,7 @@ impl<'ctx> Compiler<'ctx> {
                     lhs,
                     rhs,
                     operation,
-                    argument_types,
-                    expr_type_hint(lhs, argument_types),
+                    &operand_type,
                 )
             }
 
@@ -1544,8 +1854,7 @@ impl<'ctx> Compiler<'ctx> {
         lhs: IntValue<'ctx>,
         rhs: IntValue<'ctx>,
         operation: BinaryOp,
-        _argument_types: &[TypeInfo],
-        type_info: TypeInfo,
+        type_info: &TypeInfo,
     ) -> Result<LoweredValue<'ctx>, String> {
         let unsigned =
             type_info.is_unsigned_integer();
@@ -1765,7 +2074,7 @@ impl<'ctx> Compiler<'ctx> {
                         )
                         .map(|v| v.into()),
 
-                BinaryOp::Shr => {
+                BinaryOp::Shr =>
                     builder
                         .build_right_shift(
                             lhs,
@@ -1773,8 +2082,7 @@ impl<'ctx> Compiler<'ctx> {
                             !unsigned,
                             "shr",
                         )
-                        .map(|v| v.into())
-                }
+                        .map(|v| v.into()),
             }
             .map_err(|e| {
                 format!(
@@ -1946,6 +2254,21 @@ fn llvm_type<'ctx>(
 
 
 // ============================================================
+// TypeInfo -> LLVM type
+//
+// Kept separate from llvm_type() so the if/else PHI creation
+// has an explicit expected result type.
+// ============================================================
+
+fn expected_type_llvm_type<'ctx>(
+    context: &'ctx Context,
+    type_info: &TypeInfo,
+) -> Result<BasicTypeEnum<'ctx>, String> {
+    llvm_type(context, type_info)
+}
+
+
+// ============================================================
 // TypeInfo -> StructType
 // ============================================================
 
@@ -1972,25 +2295,104 @@ fn llvm_struct_type<'ctx>(
 
 
 // ============================================================
-// Temporary type helper
+// Expression type inference
 // ============================================================
 //
-// NOTE:
-// This is only a compatibility helper for the current one-argument
-// compiler design. The important part of the integer fix is that
-// signedness is determined by TypeInfo before emitting LLVM integer
-// operations.
+// This is important for if/else conditions:
 //
-// We will want to replace this with proper expression type propagation
-// once literals and nested expressions are fully typed.
+//     |x: i32| -> i32 {
+//         if x > 10 {
+//             ...
+//         } else {
+//             ...
+//         }
+//     }
 //
+// The comparison must use i32 for `10`, even though the entire
+// comparison produces bool.
+//
+// For an if/else:
+//
+//     if x > 10 {
+//         100
+//     } else {
+//         200
+//     }
+//
+// the branches must use the closure's return type (i32).
+// ============================================================
 
-fn expr_type_hint(
-    _value: IntValue<'_>,
+fn infer_expression_type(
     argument_types: &[TypeInfo],
+    expr: &Expr,
+    fallback: &TypeInfo,
 ) -> TypeInfo {
-    argument_types
-        .first()
-        .cloned()
-        .unwrap_or(TypeInfo::I32)
+    match expr {
+        Expr::Argument(index) =>
+            argument_types
+                .get(*index)
+                .cloned()
+                .unwrap_or_else(|| fallback.clone()),
+
+        Expr::Constant(value) =>
+            match value {
+                Value::F32(_) => TypeInfo::F32,
+                Value::F64(_) => TypeInfo::F64,
+
+                Value::I8(_) => TypeInfo::I8,
+                Value::I16(_) => TypeInfo::I16,
+                Value::I32(_) => TypeInfo::I32,
+                Value::I64(_) => TypeInfo::I64,
+                Value::I128(_) => TypeInfo::I128,
+
+                Value::U8(_) => TypeInfo::U8,
+                Value::U16(_) => TypeInfo::U16,
+                Value::U32(_) => TypeInfo::U32,
+                Value::U64(_) => TypeInfo::U64,
+                Value::U128(_) => TypeInfo::U128,
+
+                Value::Bool(_) => TypeInfo::Bool,
+            },
+
+        Expr::Field { .. } =>
+            fallback.clone(),
+
+        Expr::Eq { .. }
+        | Expr::Ne { .. }
+        | Expr::Lt { .. }
+        | Expr::Le { .. }
+        | Expr::Gt { .. }
+        | Expr::Ge { .. }
+        | Expr::And { .. }
+        | Expr::Or { .. }
+        | Expr::Not { .. } =>
+            TypeInfo::Bool,
+
+        Expr::Add { lhs, .. }
+        | Expr::Sub { lhs, .. }
+        | Expr::Mul { lhs, .. }
+        | Expr::Div { lhs, .. }
+        | Expr::Rem { lhs, .. }
+        | Expr::BitAnd { lhs, .. }
+        | Expr::BitOr { lhs, .. }
+        | Expr::BitXor { lhs, .. }
+        | Expr::Shl { lhs, .. }
+        | Expr::Shr { lhs, .. }
+        | Expr::Neg { operand: lhs } =>
+            infer_expression_type(
+                argument_types,
+                lhs,
+                fallback,
+            ),
+
+        Expr::IfElse {
+            then_branch,
+            ..
+        } =>
+            infer_expression_type(
+                argument_types,
+                then_branch,
+                fallback,
+            ),
+    }
 }

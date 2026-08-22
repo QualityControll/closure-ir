@@ -9,6 +9,7 @@ use syn::{
     ExprBlock,
     ExprClosure,
     ExprField,
+    ExprIf,
     ExprLit,
     ExprPath,
     Fields,
@@ -107,39 +108,285 @@ fn compile_type_expr(
 
 
 // ============================================================
+// Helpers
+// ============================================================
+
+fn make_type(ident: &str) -> Type {
+    syn::parse_str(ident)
+        .unwrap_or_else(|_| {
+            panic!(
+                "failed to construct type `{}`",
+                ident
+            )
+        })
+}
+
+
+fn path_type_name(
+    ty: &Type,
+) -> Option<String> {
+    match ty {
+        Type::Path(path) =>
+            path.path
+                .segments
+                .last()
+                .map(|segment| {
+                    segment.ident.to_string()
+                }),
+
+        _ => None,
+    }
+}
+
+
+// ============================================================
+// Infer the type of an expression
+// ============================================================
+//
+// This is performed by the proc macro before generating the IR.
+//
+// Important:
+//
+//     x > 10
+//
+// must infer `10` using the type of `x`, not the expected type of
+// the entire comparison.
+//
+// Likewise:
+//
+//     if x > 10 {
+//         100
+//     } else {
+//         200
+//     }
+//
+// has:
+//
+//     x > 10       -> bool
+//     100 / 200    -> i32
+//
+// ============================================================
+
+fn infer_expr_type(
+    expr: &Expr,
+    argument: &syn::Ident,
+    argument_type: &Type,
+    expected_type: &Type,
+) -> Type {
+    match expr {
+        Expr::Paren(paren) => {
+            infer_expr_type(
+                &paren.expr,
+                argument,
+                argument_type,
+                expected_type,
+            )
+        }
+
+        Expr::Block(
+            ExprBlock {
+                block,
+                ..
+            },
+        ) => {
+            if block.stmts.len() != 1 {
+                panic!(
+                    "expression block must contain exactly one expression"
+                );
+            }
+
+            match &block.stmts[0] {
+                syn::Stmt::Expr(expr, _) => {
+                    infer_expr_type(
+                        expr,
+                        argument,
+                        argument_type,
+                        expected_type,
+                    )
+                }
+
+                _ => {
+                    panic!(
+                        "expression block must contain exactly one expression"
+                    );
+                }
+            }
+        }
+
+        Expr::Path(
+            ExprPath {
+                path,
+                ..
+            },
+        ) => {
+            let ident =
+                path.segments
+                    .last()
+                    .unwrap()
+                    .ident
+                    .clone();
+
+            if ident == *argument {
+                argument_type.clone()
+            } else {
+                panic!(
+                    "unsupported identifier: {}",
+                    ident
+                );
+            }
+        }
+
+        Expr::Lit(
+            ExprLit {
+                lit,
+                ..
+            },
+        ) => {
+            match lit {
+                Lit::Bool(_) => {
+                    make_type("bool")
+                }
+
+                Lit::Float(_) => {
+                    expected_type.clone()
+                }
+
+                Lit::Int(_) => {
+                    expected_type.clone()
+                }
+
+                _ => {
+                    panic!(
+                        "unsupported literal"
+                    );
+                }
+            }
+        }
+
+        Expr::Binary(
+            ExprBinary {
+                left,
+                op,
+                right,
+                ..
+            },
+        ) => {
+            match op {
+                syn::BinOp::Eq(_)
+                | syn::BinOp::Ne(_)
+                | syn::BinOp::Lt(_)
+                | syn::BinOp::Le(_)
+                | syn::BinOp::Gt(_)
+                | syn::BinOp::Ge(_)
+                | syn::BinOp::And(_)
+                | syn::BinOp::Or(_) => {
+                    make_type("bool")
+                }
+
+                _ => {
+                    infer_expr_type(
+                        left,
+                        argument,
+                        argument_type,
+                        expected_type,
+                    )
+                }
+            }
+        }
+
+        Expr::Unary(unary) => {
+            match &unary.op {
+                syn::UnOp::Not(_) => {
+                    make_type("bool")
+                }
+
+                syn::UnOp::Neg(_) => {
+                    infer_expr_type(
+                        &unary.expr,
+                        argument,
+                        argument_type,
+                        expected_type,
+                    )
+                }
+
+                _ => {
+                    panic!(
+                        "unsupported unary operator"
+                    );
+                }
+            }
+        }
+
+        Expr::If(
+            ExprIf {
+                then_branch,
+                ..
+            },
+        ) => {
+            if then_branch.stmts.len() != 1 {
+                panic!(
+                    "if branch must contain exactly one expression"
+                );
+            }
+
+            match &then_branch.stmts[0] {
+                syn::Stmt::Expr(expr, _) => {
+                    infer_expr_type(
+                        expr,
+                        argument,
+                        argument_type,
+                        expected_type,
+                    )
+                }
+
+                _ => {
+                    panic!(
+                        "if branch must contain exactly one expression"
+                    );
+                }
+            }
+        }
+
+        Expr::Field(
+            ExprField {
+                base,
+                ..
+            },
+        ) => {
+            infer_expr_type(
+                base,
+                argument,
+                argument_type,
+                expected_type,
+            )
+        }
+
+        _ => {
+            expected_type.clone()
+        }
+    }
+}
+
+
+// ============================================================
 // Integer literal -> typed Value
 // ============================================================
 //
-// Unsuffixed literals inherit the closure argument type:
+// Integer literals are inferred from the type of the expression
+// they participate in.
 //
-//     |x: i8|  -> i8  { x + 5 }
-//     |x: i16| -> i16 { x + 5 }
-//     |x: i32| -> i32 { x + 5 }
-//     |x: i64| -> i64 { x + 5 }
+// For:
 //
-//     |x: u8|  -> u8  { x + 5 }
-//     |x: u16| -> u16 { x + 5 }
-//     |x: u32| -> u32 { x + 5 }
-//     |x: u64| -> u64 { x + 5 }
+//     x > 10
 //
-// Explicit suffixes win:
-//
-//     5i8
-//     5i16
-//     5i32
-//     5i64
-//     5i128
-//     5u8
-//     5u16
-//     5u32
-//     5u64
-//     5u128
+// the expected type passed to the literal is the type of `x`,
+// rather than the bool result type of `x > 10`.
 //
 // ============================================================
 
 fn integer_literal_value(
     value: &syn::LitInt,
-    argument_type: &Type,
+    expected_type: &Type,
 ) -> proc_macro2::TokenStream {
     let digits =
         value.base10_digits();
@@ -226,91 +473,79 @@ fn integer_literal_value(
     // Unsuffixed literal
     // --------------------------------------------------------
 
-    match argument_type {
-        Type::Path(path) => {
-            let ident =
-                path.path
-                    .segments
-                    .last()
-                    .unwrap()
-                    .ident
-                    .to_string();
+    match path_type_name(expected_type)
+        .as_deref()
+    {
+        Some("i8") => quote! {
+            ::closure_llvm::Value::I8(
+                #digits.parse::<i8>().unwrap()
+            )
+        },
 
-            match ident.as_str() {
-                "i8" => quote! {
-                    ::closure_llvm::Value::I8(
-                        #digits.parse::<i8>().unwrap()
-                    )
-                },
+        Some("i16") => quote! {
+            ::closure_llvm::Value::I16(
+                #digits.parse::<i16>().unwrap()
+            )
+        },
 
-                "i16" => quote! {
-                    ::closure_llvm::Value::I16(
-                        #digits.parse::<i16>().unwrap()
-                    )
-                },
+        Some("i32") => quote! {
+            ::closure_llvm::Value::I32(
+                #digits.parse::<i32>().unwrap()
+            )
+        },
 
-                "i32" => quote! {
-                    ::closure_llvm::Value::I32(
-                        #digits.parse::<i32>().unwrap()
-                    )
-                },
+        Some("i64") => quote! {
+            ::closure_llvm::Value::I64(
+                #digits.parse::<i64>().unwrap()
+            )
+        },
 
-                "i64" => quote! {
-                    ::closure_llvm::Value::I64(
-                        #digits.parse::<i64>().unwrap()
-                    )
-                },
+        Some("i128") => quote! {
+            ::closure_llvm::Value::I128(
+                #digits.parse::<i128>().unwrap()
+            )
+        },
 
-                "i128" => quote! {
-                    ::closure_llvm::Value::I128(
-                        #digits.parse::<i128>().unwrap()
-                    )
-                },
+        Some("u8") => quote! {
+            ::closure_llvm::Value::U8(
+                #digits.parse::<u8>().unwrap()
+            )
+        },
 
-                "u8" => quote! {
-                    ::closure_llvm::Value::U8(
-                        #digits.parse::<u8>().unwrap()
-                    )
-                },
+        Some("u16") => quote! {
+            ::closure_llvm::Value::U16(
+                #digits.parse::<u16>().unwrap()
+            )
+        },
 
-                "u16" => quote! {
-                    ::closure_llvm::Value::U16(
-                        #digits.parse::<u16>().unwrap()
-                    )
-                },
+        Some("u32") => quote! {
+            ::closure_llvm::Value::U32(
+                #digits.parse::<u32>().unwrap()
+            )
+        },
 
-                "u32" => quote! {
-                    ::closure_llvm::Value::U32(
-                        #digits.parse::<u32>().unwrap()
-                    )
-                },
+        Some("u64") => quote! {
+            ::closure_llvm::Value::U64(
+                #digits.parse::<u64>().unwrap()
+            )
+        },
 
-                "u64" => quote! {
-                    ::closure_llvm::Value::U64(
-                        #digits.parse::<u64>().unwrap()
-                    )
-                },
+        Some("u128") => quote! {
+            ::closure_llvm::Value::U128(
+                #digits.parse::<u128>().unwrap()
+            )
+        },
 
-                "u128" => quote! {
-                    ::closure_llvm::Value::U128(
-                        #digits.parse::<u128>().unwrap()
-                    )
-                },
-
-                _ => {
-                    panic!(
-                        "cannot infer integer literal type from \
-                         closure argument type `{}`",
-                        ident
-                    );
-                }
-            }
+        Some(other) => {
+            panic!(
+                "cannot infer integer literal type from expected expression type `{}`",
+                other
+            );
         }
 
-        _ => {
+        None => {
             panic!(
-                "cannot infer integer literal type from \
-                 closure argument type"
+                "cannot infer integer literal type from expected expression type"
             );
         }
     }
@@ -318,124 +553,34 @@ fn integer_literal_value(
 
 
 // ============================================================
-// Float literal -> typed Value
-// ============================================================
-//
-// Unsuffixed literals inherit the closure argument type:
-//
-//     |x: f32| -> f32 { x + 5.0 }
-//     |x: f64| -> f64 { x + 5.0 }
-//
-// Explicit suffixes win:
-//
-//     5.0f32
-//     5.0f64
-//
+// Convert a block into a single IR expression
 // ============================================================
 
-fn float_literal_value(
-    value: &syn::LitFloat,
+fn block_to_ir(
+    block: &syn::Block,
+    argument: &syn::Ident,
     argument_type: &Type,
+    expected_type: &Type,
 ) -> proc_macro2::TokenStream {
-    let suffix =
-        value.suffix();
-
-    // --------------------------------------------------------
-    // Explicit suffix
-    // --------------------------------------------------------
-
-    if !suffix.is_empty() {
-        return match suffix {
-            "f32" => {
-                let parsed =
-                    value
-                        .base10_parse::<f32>()
-                        .unwrap();
-
-                quote! {
-                    ::closure_llvm::Value::F32(
-                        #parsed
-                    )
-                }
-            }
-
-            "f64" => {
-                let parsed =
-                    value
-                        .base10_parse::<f64>()
-                        .unwrap();
-
-                quote! {
-                    ::closure_llvm::Value::F64(
-                        #parsed
-                    )
-                }
-            }
-
-            _ => {
-                panic!(
-                    "unsupported float literal suffix: {}",
-                    suffix
-                );
-            }
-        };
+    if block.stmts.len() != 1 {
+        panic!(
+            "closure/control-flow block must contain exactly one expression"
+        );
     }
 
-    // --------------------------------------------------------
-    // Unsuffixed literal
-    // --------------------------------------------------------
-
-    match argument_type {
-        Type::Path(path) => {
-            let ident =
-                path.path
-                    .segments
-                    .last()
-                    .unwrap()
-                    .ident
-                    .to_string();
-
-            match ident.as_str() {
-                "f32" => {
-                    let parsed =
-                        value
-                            .base10_parse::<f32>()
-                            .unwrap();
-
-                    quote! {
-                        ::closure_llvm::Value::F32(
-                            #parsed
-                        )
-                    }
-                }
-
-                "f64" => {
-                    let parsed =
-                        value
-                            .base10_parse::<f64>()
-                            .unwrap();
-
-                    quote! {
-                        ::closure_llvm::Value::F64(
-                            #parsed
-                        )
-                    }
-                }
-
-                _ => {
-                    panic!(
-                        "cannot infer floating-point literal type \
-                         from closure argument type `{}`",
-                        ident
-                    );
-                }
-            }
+    match &block.stmts[0] {
+        syn::Stmt::Expr(expr, _) => {
+            expr_to_ir(
+                expr,
+                argument,
+                argument_type,
+                expected_type,
+            )
         }
 
         _ => {
             panic!(
-                "cannot infer floating-point literal type \
-                 from closure argument type"
+                "closure/control-flow block must contain exactly one expression"
             );
         }
     }
@@ -450,6 +595,7 @@ fn expr_to_ir(
     expr: &Expr,
     argument: &syn::Ident,
     argument_type: &Type,
+    expected_type: &Type,
 ) -> proc_macro2::TokenStream {
     match expr {
 
@@ -462,6 +608,7 @@ fn expr_to_ir(
                 &paren.expr,
                 argument,
                 argument_type,
+                expected_type,
             )
         }
 
@@ -476,28 +623,77 @@ fn expr_to_ir(
                 ..
             },
         ) => {
-            if block.stmts.len() != 1 {
-                panic!(
-                    "closure body must contain exactly one expression"
+            block_to_ir(
+                block,
+                argument,
+                argument_type,
+                expected_type,
+            )
+        }
+
+
+        // ----------------------------------------------------
+        // If / else expression
+        // ----------------------------------------------------
+
+        Expr::If(
+            ExprIf {
+                cond,
+                then_branch,
+                else_branch,
+                ..
+            },
+        ) => {
+            let bool_type =
+                make_type("bool");
+
+            let condition =
+                expr_to_ir(
+                    cond,
+                    argument,
+                    argument_type,
+                    &bool_type,
                 );
-            }
 
-            match &block.stmts[0] {
-                syn::Stmt::Expr(
-                    expr,
-                    _,
-                ) => {
-                    expr_to_ir(
-                        expr,
-                        argument,
-                        argument_type,
-                    )
-                }
+            let then_expr =
+                block_to_ir(
+                    then_branch,
+                    argument,
+                    argument_type,
+                    expected_type,
+                );
 
-                _ => {
-                    panic!(
-                        "closure body must contain exactly one expression"
-                    );
+            let else_expr =
+                match else_branch {
+                    Some((
+                        _else_token,
+                        else_expr,
+                    )) => {
+                        expr_to_ir(
+                            else_expr,
+                            argument,
+                            argument_type,
+                            expected_type,
+                        )
+                    }
+
+                    None => {
+                        panic!(
+                            "if expression must have an else branch"
+                        );
+                    }
+                };
+
+            quote! {
+                ::closure_llvm::Expr::IfElse {
+                    condition:
+                        Box::new(#condition),
+
+                    then_branch:
+                        Box::new(#then_expr),
+
+                    else_branch:
+                        Box::new(#else_expr),
                 }
             }
         }
@@ -515,11 +711,40 @@ fn expr_to_ir(
                 ..
             },
         ) => {
+            // ------------------------------------------------
+            // Comparisons and logical operators produce bool,
+            // but their operands use the type of the lhs.
+            // ------------------------------------------------
+
+            let operand_type =
+                match op {
+                    syn::BinOp::Eq(_)
+                    | syn::BinOp::Ne(_)
+                    | syn::BinOp::Lt(_)
+                    | syn::BinOp::Le(_)
+                    | syn::BinOp::Gt(_)
+                    | syn::BinOp::Ge(_)
+                    | syn::BinOp::And(_)
+                    | syn::BinOp::Or(_) => {
+                        infer_expr_type(
+                            left,
+                            argument,
+                            argument_type,
+                            expected_type,
+                        )
+                    }
+
+                    _ => {
+                        expected_type.clone()
+                    }
+                };
+
             let lhs =
                 expr_to_ir(
                     left,
                     argument,
                     argument_type,
+                    &operand_type,
                 );
 
             let rhs =
@@ -527,6 +752,7 @@ fn expr_to_ir(
                     right,
                     argument,
                     argument_type,
+                    &operand_type,
                 );
 
             if matches!(
@@ -722,11 +948,34 @@ fn expr_to_ir(
         // ----------------------------------------------------
 
         Expr::Unary(unary) => {
+            let operand_type =
+                match &unary.op {
+                    syn::UnOp::Not(_) => {
+                        infer_expr_type(
+                            &unary.expr,
+                            argument,
+                            argument_type,
+                            expected_type,
+                        )
+                    }
+
+                    syn::UnOp::Neg(_) => {
+                        expected_type.clone()
+                    }
+
+                    _ => {
+                        panic!(
+                            "unsupported unary operator"
+                        );
+                    }
+                };
+
             let operand =
                 expr_to_ir(
                     &unary.expr,
                     argument,
                     argument_type,
+                    &operand_type,
                 );
 
             match &unary.op {
@@ -747,9 +996,7 @@ fn expr_to_ir(
                 }
 
                 _ => {
-                    panic!(
-                        "unsupported unary operator"
-                    );
+                    unreachable!();
                 }
             }
         }
@@ -771,6 +1018,7 @@ fn expr_to_ir(
                     base,
                     argument,
                     argument_type,
+                    expected_type,
                 );
 
             let field_name =
@@ -824,7 +1072,7 @@ fn expr_to_ir(
 
 
         // ----------------------------------------------------
-        // Float literal
+        // Floating-point literal
         // ----------------------------------------------------
 
         Expr::Lit(
@@ -834,15 +1082,47 @@ fn expr_to_ir(
             },
         ) => {
             let value =
-                float_literal_value(
-                    value,
-                    argument_type,
-                );
+                value
+                    .base10_parse::<f64>()
+                    .unwrap();
 
-            quote! {
-                ::closure_llvm::Expr::Constant(
-                    #value
-                )
+            match path_type_name(expected_type)
+                .as_deref()
+            {
+                Some("f32") => {
+                    quote! {
+                        ::closure_llvm::Expr::Constant(
+                            ::closure_llvm::Value::F32(
+                                #value as f32
+                            )
+                        )
+                    }
+                }
+
+                Some("f64") => {
+                    quote! {
+                        ::closure_llvm::Expr::Constant(
+                            ::closure_llvm::Value::F64(
+                                #value
+                            )
+                        )
+                    }
+                }
+
+                Some(other) => {
+                    panic!(
+                        "cannot infer floating-point literal type \
+                         from expected expression type `{}`",
+                        other
+                    );
+                }
+
+                None => {
+                    panic!(
+                        "cannot infer floating-point literal type \
+                         from expected expression type"
+                    );
+                }
             }
         }
 
@@ -860,7 +1140,7 @@ fn expr_to_ir(
             let value =
                 integer_literal_value(
                     value,
-                    argument_type,
+                    expected_type,
                 );
 
             quote! {
@@ -921,7 +1201,6 @@ pub fn compile_closure(
             input as ExprClosure
         );
 
-
     // --------------------------------------------------------
     // Extract exactly one argument
     // --------------------------------------------------------
@@ -944,7 +1223,6 @@ pub fn compile_closure(
         );
     }
 
-
     // --------------------------------------------------------
     // Argument type
     // --------------------------------------------------------
@@ -961,7 +1239,6 @@ pub fn compile_closure(
                 );
             }
         };
-
 
     // --------------------------------------------------------
     // Argument identifier
@@ -993,7 +1270,6 @@ pub fn compile_closure(
             }
         };
 
-
     // --------------------------------------------------------
     // Return type
     // --------------------------------------------------------
@@ -1014,7 +1290,6 @@ pub fn compile_closure(
             }
         };
 
-
     // --------------------------------------------------------
     // Type information
     // --------------------------------------------------------
@@ -1029,7 +1304,6 @@ pub fn compile_closure(
             &return_type,
         );
 
-
     // --------------------------------------------------------
     // Convert closure body to compiler IR
     // --------------------------------------------------------
@@ -1039,20 +1313,11 @@ pub fn compile_closure(
             &closure.body,
             &argument_ident,
             &argument_type,
+            &return_type,
         );
-
 
     // --------------------------------------------------------
     // Generate compiled closure
-    // --------------------------------------------------------
-    //
-    // The Context must outlive the CompiledClosure because
-    // CompiledClosure contains an ExecutionEngine<'ctx>.
-    //
-    // We intentionally leak the Context here so that the
-    // generated CompiledClosure can safely live for the
-    // remainder of the process.
-    //
     // --------------------------------------------------------
 
     let expanded =
@@ -1103,21 +1368,6 @@ pub fn compile_closure(
 // ============================================================
 // call!
 // ============================================================
-//
-// Usage:
-//
-//     let result = call!(
-//         compiled,
-//         rectangle
-//     );
-//
-// Expands approximately to:
-//
-//     unsafe {
-//         compiled.call(&rectangle)
-//     }
-//
-// ============================================================
 
 #[proc_macro]
 pub fn call(
@@ -1132,7 +1382,6 @@ pub fn call(
             >::parse_terminated
         );
 
-
     if args.len() != 2 {
         panic!(
             "call! expects exactly two arguments: \
@@ -1140,17 +1389,14 @@ pub fn call(
         );
     }
 
-
     let mut iter =
         args.into_iter();
-
 
     let compiled =
         iter.next().unwrap();
 
     let value =
         iter.next().unwrap();
-
 
     quote! {
         unsafe {
@@ -1176,10 +1422,8 @@ pub fn derive_compile_type(
             input as ItemStruct
         );
 
-
     let name =
         item.ident;
-
 
     // --------------------------------------------------------
     // Named fields only
@@ -1197,7 +1441,6 @@ pub fn derive_compile_type(
                 );
             }
         };
-
 
     // --------------------------------------------------------
     // Generate TypeInfo fields
@@ -1236,7 +1479,6 @@ pub fn derive_compile_type(
             })
             .collect::<Vec<_>>();
 
-
     // --------------------------------------------------------
     // Generate LLVM field types
     // --------------------------------------------------------
@@ -1254,7 +1496,6 @@ pub fn derive_compile_type(
                 }
             })
             .collect::<Vec<_>>();
-
 
     // --------------------------------------------------------
     // Generate CompileType implementation
@@ -1282,7 +1523,6 @@ pub fn derive_compile_type(
                     }
                 }
 
-
                 fn llvm_type<'ctx>(
                     context:
                         &'ctx ::inkwell::context::Context,
@@ -1300,7 +1540,6 @@ pub fn derive_compile_type(
                 }
             }
         };
-
 
     expanded.into()
 }
