@@ -174,7 +174,7 @@ fn main() {
  - [ ] Function calls
  - [ ] Nested expressions
  - [ ] Arrays
- - [ ] Tuples
+ - [x] Tuples
  - [ ] Enums
  - [ ] Generic types
  - [ ] Better error reporting
