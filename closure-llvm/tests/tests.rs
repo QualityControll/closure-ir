@@ -50,6 +50,15 @@ mod tests {
         assert_eq!(call!(compiled, 5, 10), 10);
     }
 
+    #[test]
+    fn test_zero_arguments() {
+        let compiled = compile_closure!(|| -> i32 {
+            100
+        });
+
+        assert_eq!(call!(compiled), 100);
+    }
+
     // ============================================================
     // Compound expressions
     // ============================================================
