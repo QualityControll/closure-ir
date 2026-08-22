@@ -5,14 +5,19 @@ use inkwell::{
     context::Context,
     execution_engine::ExecutionEngine,
     module::Module,
-    types::{BasicType, BasicTypeEnum, StructType},
-    values::{BasicValueEnum, FloatValue, IntValue, PointerValue},
+    types::{BasicTypeEnum, StructType},
+    values::{
+        BasicValueEnum,
+        FloatValue,
+        FunctionValue,
+        IntValue,
+        PointerValue,
+    },
     AddressSpace,
+    FloatPredicate,
+    IntPredicate,
     OptimizationLevel,
 };
-
-use inkwell::FloatPredicate;
-use inkwell::IntPredicate;
 
 pub use closure_llvm_macro::{
     call,
@@ -25,7 +30,7 @@ pub use closure_llvm_macro::{
 // Type information
 // ============================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeInfo {
     F32,
     F64,
@@ -52,47 +57,50 @@ pub enum TypeInfo {
 
 impl TypeInfo {
     pub fn is_float(&self) -> bool {
-        matches!(
-            self,
-            TypeInfo::F32 | TypeInfo::F64
-        )
+        matches!(self, Self::F32 | Self::F64)
     }
 
     pub fn is_signed_integer(&self) -> bool {
         matches!(
             self,
-            TypeInfo::I8
-                | TypeInfo::I16
-                | TypeInfo::I32
-                | TypeInfo::I64
-                | TypeInfo::I128
+            Self::I8
+                | Self::I16
+                | Self::I32
+                | Self::I64
+                | Self::I128
         )
     }
 
     pub fn is_unsigned_integer(&self) -> bool {
         matches!(
             self,
-            TypeInfo::U8
-                | TypeInfo::U16
-                | TypeInfo::U32
-                | TypeInfo::U64
-                | TypeInfo::U128
+            Self::U8
+                | Self::U16
+                | Self::U32
+                | Self::U64
+                | Self::U128
         )
     }
 
     pub fn is_integer(&self) -> bool {
         self.is_signed_integer()
             || self.is_unsigned_integer()
-            || matches!(self, TypeInfo::Bool)
+            || self.is_bool()
     }
 
     pub fn is_bool(&self) -> bool {
-        matches!(self, TypeInfo::Bool)
+        matches!(self, Self::Bool)
+    }
+
+    pub fn is_numeric(&self) -> bool {
+        self.is_float()
+            || self.is_signed_integer()
+            || self.is_unsigned_integer()
     }
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldInfo {
     pub name: String,
     pub type_info: TypeInfo,
@@ -128,7 +136,6 @@ impl CompileType for f32 {
     }
 }
 
-
 impl CompileType for f64 {
     fn type_info() -> TypeInfo {
         TypeInfo::F64
@@ -140,7 +147,6 @@ impl CompileType for f64 {
         context.f64_type().into()
     }
 }
-
 
 impl CompileType for i8 {
     fn type_info() -> TypeInfo {
@@ -154,7 +160,6 @@ impl CompileType for i8 {
     }
 }
 
-
 impl CompileType for i16 {
     fn type_info() -> TypeInfo {
         TypeInfo::I16
@@ -166,7 +171,6 @@ impl CompileType for i16 {
         context.i16_type().into()
     }
 }
-
 
 impl CompileType for i32 {
     fn type_info() -> TypeInfo {
@@ -180,7 +184,6 @@ impl CompileType for i32 {
     }
 }
 
-
 impl CompileType for i64 {
     fn type_info() -> TypeInfo {
         TypeInfo::I64
@@ -192,7 +195,6 @@ impl CompileType for i64 {
         context.i64_type().into()
     }
 }
-
 
 impl CompileType for i128 {
     fn type_info() -> TypeInfo {
@@ -206,7 +208,6 @@ impl CompileType for i128 {
     }
 }
 
-
 impl CompileType for u8 {
     fn type_info() -> TypeInfo {
         TypeInfo::U8
@@ -218,7 +219,6 @@ impl CompileType for u8 {
         context.i8_type().into()
     }
 }
-
 
 impl CompileType for u16 {
     fn type_info() -> TypeInfo {
@@ -232,7 +232,6 @@ impl CompileType for u16 {
     }
 }
 
-
 impl CompileType for u32 {
     fn type_info() -> TypeInfo {
         TypeInfo::U32
@@ -244,7 +243,6 @@ impl CompileType for u32 {
         context.i32_type().into()
     }
 }
-
 
 impl CompileType for u64 {
     fn type_info() -> TypeInfo {
@@ -258,7 +256,6 @@ impl CompileType for u64 {
     }
 }
 
-
 impl CompileType for u128 {
     fn type_info() -> TypeInfo {
         TypeInfo::U128
@@ -271,7 +268,6 @@ impl CompileType for u128 {
     }
 }
 
-
 impl CompileType for bool {
     fn type_info() -> TypeInfo {
         TypeInfo::Bool
@@ -283,6 +279,82 @@ impl CompileType for bool {
         context.bool_type().into()
     }
 }
+
+
+// ============================================================
+// Tuple CompileType implementations
+// ============================================================
+
+impl CompileType for () {
+    fn type_info() -> TypeInfo {
+        TypeInfo::Struct {
+            name: "()".to_string(),
+            fields: Vec::new(),
+        }
+    }
+
+    fn llvm_type<'ctx>(
+        context: &'ctx Context,
+    ) -> BasicTypeEnum<'ctx> {
+        context.struct_type(&[], false).into()
+    }
+}
+
+
+macro_rules! impl_tuple_compile_type {
+    ($($T:ident : $index:tt),+) => {
+        impl<$($T: CompileType),+> CompileType
+            for ($($T,)+)
+        {
+            fn type_info() -> TypeInfo {
+                TypeInfo::Struct {
+                    name: stringify!(($($T,)+)).to_string(),
+
+                    fields: vec![
+                        $(
+                            FieldInfo {
+                                name: stringify!($index).to_string(),
+                                type_info: $T::type_info(),
+                            }
+                        ),+
+                    ],
+                }
+            }
+
+            fn llvm_type<'ctx>(
+                context: &'ctx Context,
+            ) -> BasicTypeEnum<'ctx> {
+                context
+                    .struct_type(
+                        &[
+                            $(
+                                $T::llvm_type(context)
+                            ),+
+                        ],
+                        false,
+                    )
+                    .into()
+            }
+        }
+    };
+}
+
+impl_tuple_compile_type!(A: 0);
+impl_tuple_compile_type!(A: 0, B: 1);
+impl_tuple_compile_type!(A: 0, B: 1, C: 2);
+impl_tuple_compile_type!(A: 0, B: 1, C: 2, D: 3);
+impl_tuple_compile_type!(A: 0, B: 1, C: 2, D: 3, E: 4);
+impl_tuple_compile_type!(A: 0, B: 1, C: 2, D: 3, E: 4, F: 5);
+impl_tuple_compile_type!(A: 0, B: 1, C: 2, D: 3, E: 4, F: 5, G: 6);
+impl_tuple_compile_type!(A: 0, B: 1, C: 2, D: 3, E: 4, F: 5, G: 6, H: 7);
+impl_tuple_compile_type!(A: 0, B: 1, C: 2, D: 3, E: 4, F: 5, G: 6, H: 7, I: 8);
+impl_tuple_compile_type!(A: 0, B: 1, C: 2, D: 3, E: 4, F: 5, G: 6, H: 7, I: 8, J: 9);
+impl_tuple_compile_type!(A: 0, B: 1, C: 2, D: 3, E: 4, F: 5, G: 6, H: 7, I: 8, J: 9, K: 10);
+impl_tuple_compile_type!(A: 0, B: 1, C: 2, D: 3, E: 4, F: 5, G: 6, H: 7, I: 8, J: 9, K: 10, L: 11);
+impl_tuple_compile_type!(A: 0, B: 1, C: 2, D: 3, E: 4, F: 5, G: 6, H: 7, I: 8, J: 9, K: 10, L: 11, M: 12);
+impl_tuple_compile_type!(A: 0, B: 1, C: 2, D: 3, E: 4, F: 5, G: 6, H: 7, I: 8, J: 9, K: 10, L: 11, M: 12, N: 13);
+impl_tuple_compile_type!(A: 0, B: 1, C: 2, D: 3, E: 4, F: 5, G: 6, H: 7, I: 8, J: 9, K: 10, L: 11, M: 12, N: 13, O: 14);
+impl_tuple_compile_type!(A: 0, B: 1, C: 2, D: 3, E: 4, F: 5, G: 6, H: 7, I: 8, J: 9, K: 10, L: 11, M: 12, N: 13, O: 14, P: 15);
 
 
 // ============================================================
@@ -423,13 +495,6 @@ pub enum Expr {
         operand: Box<Expr>,
     },
 
-    // --------------------------------------------------------
-    // Conditional expression
-    //
-    // IMPORTANT:
-    // These field names must match the proc macro exactly.
-    // --------------------------------------------------------
-
     IfElse {
         condition: Box<Expr>,
         then_branch: Box<Expr>,
@@ -450,7 +515,7 @@ pub struct Closure {
 
 
 // ============================================================
-// Typed compiled closure
+// Compiled closure
 // ============================================================
 
 pub struct CompiledClosure<'ctx, Args, Ret> {
@@ -460,9 +525,10 @@ pub struct CompiledClosure<'ctx, Args, Ret> {
     _marker: PhantomData<fn(Args) -> Ret>,
 }
 
-
-impl<'ctx, Args, Ret>
-    CompiledClosure<'ctx, Args, Ret>
+impl<'ctx, Args, Ret> CompiledClosure<'ctx, Args, Ret>
+where
+    Args: CompileType,
+    Ret: CompileType + 'static,
 {
     fn new(
         engine: ExecutionEngine<'ctx>,
@@ -478,11 +544,7 @@ impl<'ctx, Args, Ret>
     pub unsafe fn call(
         &self,
         value: &Args,
-    ) -> Ret
-    where
-        Args: CompileType,
-        Ret: CompileType,
-    {
+    ) -> Ret {
         jit_call::<Args, Ret>(
             &self.engine,
             &self.function_name,
@@ -493,7 +555,7 @@ impl<'ctx, Args, Ret>
 
 
 // ============================================================
-// Generic JIT invocation
+// JIT invocation
 // ============================================================
 
 unsafe fn jit_call<Args, Ret>(
@@ -503,24 +565,18 @@ unsafe fn jit_call<Args, Ret>(
 ) -> Ret
 where
     Args: CompileType,
-    Ret: CompileType,
+    Ret: CompileType + 'static,
 {
-    let address =
-        engine
-            .get_function_address(function_name)
-            .expect(
-                "failed to get JIT function address",
-            );
-
     type JitFn<Ret> =
         unsafe extern "C" fn(*const u8) -> Ret;
 
-    let function: JitFn<Ret> =
-        std::mem::transmute(address);
+    let function =
+        engine
+            .get_function::<JitFn<Ret>>(function_name)
+            .expect("failed to get JIT function");
 
-    function(
-        value as *const Args
-            as *const u8,
+    function.call(
+        value as *const Args as *const u8
     )
 }
 
@@ -533,18 +589,12 @@ pub struct Compiler<'ctx> {
     context: &'ctx Context,
 }
 
-
 impl<'ctx> Compiler<'ctx> {
     pub fn new(
         context: &'ctx Context,
     ) -> Self {
         Self { context }
     }
-
-
-    // --------------------------------------------------------
-    // Compile
-    // --------------------------------------------------------
 
     pub fn compile<Args, Ret>(
         &self,
@@ -555,17 +605,18 @@ impl<'ctx> Compiler<'ctx> {
     >
     where
         Args: CompileType,
-        Ret: CompileType,
+        Ret: CompileType + 'static,
     {
+        let context = self.context;
+
         let module =
-            self.context.create_module(
-                "closure_module",
-            );
+            context.create_module("closure_module");
 
         let function_name =
             "compiled_closure";
 
         self.generate_function(
+            context,
             &module,
             function_name,
             closure,
@@ -573,9 +624,7 @@ impl<'ctx> Compiler<'ctx> {
 
         println!(
             "Generated LLVM IR:\n{}",
-            module
-                .print_to_string()
-                .to_string()
+            module.print_to_string().to_string()
         );
 
         let engine =
@@ -599,78 +648,33 @@ impl<'ctx> Compiler<'ctx> {
     }
 
 
-    // --------------------------------------------------------
-    // Generate LLVM function
-    // --------------------------------------------------------
+    // ========================================================
+    // Function generation
+    // ========================================================
 
     fn generate_function(
         &self,
+        context: &'ctx Context,
         module: &Module<'ctx>,
         function_name: &str,
         closure: &Closure,
     ) -> Result<(), String> {
-        if closure.arguments.len() != 1 {
-            return Err(
-                "only one closure argument is currently supported"
-                    .to_string(),
-            );
-        }
-
         let return_type =
             llvm_type(
-                self.context,
+                context,
                 &closure.return_type,
             )?;
 
         let argument_pointer_type =
-            self.context.ptr_type(
+            context.ptr_type(
                 AddressSpace::default(),
             );
 
         let function_type =
-            match return_type {
-                BasicTypeEnum::ArrayType(ty) =>
-                    ty.fn_type(
-                        &[argument_pointer_type.into()],
-                        false,
-                    ),
-
-                BasicTypeEnum::FloatType(ty) =>
-                    ty.fn_type(
-                        &[argument_pointer_type.into()],
-                        false,
-                    ),
-
-                BasicTypeEnum::IntType(ty) =>
-                    ty.fn_type(
-                        &[argument_pointer_type.into()],
-                        false,
-                    ),
-
-                BasicTypeEnum::PointerType(ty) =>
-                    ty.fn_type(
-                        &[argument_pointer_type.into()],
-                        false,
-                    ),
-
-                BasicTypeEnum::StructType(ty) =>
-                    ty.fn_type(
-                        &[argument_pointer_type.into()],
-                        false,
-                    ),
-
-                BasicTypeEnum::VectorType(ty) =>
-                    ty.fn_type(
-                        &[argument_pointer_type.into()],
-                        false,
-                    ),
-
-                BasicTypeEnum::ScalableVectorType(ty) =>
-                    ty.fn_type(
-                        &[argument_pointer_type.into()],
-                        false,
-                    ),
-            };
+            basic_type_fn_type(
+                return_type,
+                argument_pointer_type,
+            );
 
         let function =
             module.add_function(
@@ -680,17 +684,17 @@ impl<'ctx> Compiler<'ctx> {
             );
 
         let entry =
-            self.context.append_basic_block(
+            context.append_basic_block(
                 function,
                 "entry",
             );
 
         let builder =
-            self.context.create_builder();
+            context.create_builder();
 
         builder.position_at_end(entry);
 
-        let argument =
+        let argument_pointer =
             function
                 .get_nth_param(0)
                 .ok_or_else(|| {
@@ -700,10 +704,16 @@ impl<'ctx> Compiler<'ctx> {
                 .into_pointer_value();
 
         let arguments =
-            vec![argument];
+            self.build_argument_pointers(
+                context,
+                &builder,
+                argument_pointer,
+                &closure.arguments,
+            )?;
 
         let value =
             self.lower_expr(
+                context,
                 &builder,
                 function,
                 &arguments,
@@ -714,6 +724,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let value =
             self.materialize_value(
+                context,
                 &builder,
                 value,
             )?;
@@ -738,14 +749,79 @@ impl<'ctx> Compiler<'ctx> {
     }
 
 
-    // --------------------------------------------------------
-    // Lower expression
-    // --------------------------------------------------------
+    // ========================================================
+    // Argument pointers
+    // ========================================================
+
+    fn build_argument_pointers(
+        &self,
+        context: &'ctx Context,
+        builder: &Builder<'ctx>,
+        argument_pointer: PointerValue<'ctx>,
+        argument_types: &[TypeInfo],
+    ) -> Result<
+        Vec<PointerValue<'ctx>>,
+        String,
+    > {
+        if argument_types.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let field_types =
+            argument_types
+                .iter()
+                .map(|type_info| {
+                    llvm_type(
+                        context,
+                        type_info,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+        let tuple_type =
+            context.struct_type(
+                &field_types,
+                false,
+            );
+
+        let mut result =
+            Vec::with_capacity(
+                argument_types.len()
+            );
+
+        for index in 0..argument_types.len() {
+            let pointer =
+                builder
+                    .build_struct_gep(
+                        tuple_type,
+                        argument_pointer,
+                        index as u32,
+                        &format!("arg{}_ptr", index),
+                    )
+                    .map_err(|error| {
+                        format!(
+                            "failed to build argument {} GEP: {:?}",
+                            index,
+                            error
+                        )
+                    })?;
+
+            result.push(pointer);
+        }
+
+        Ok(result)
+    }
+
+
+    // ========================================================
+    // Expression lowering
+    // ========================================================
 
     fn lower_expr(
         &self,
+        context: &'ctx Context,
         builder: &Builder<'ctx>,
-        function: inkwell::values::FunctionValue<'ctx>,
+        function: FunctionValue<'ctx>,
         arguments: &[PointerValue<'ctx>],
         argument_types: &[TypeInfo],
         expected_type: &TypeInfo,
@@ -766,13 +842,13 @@ impl<'ctx> Compiler<'ctx> {
                 let type_info =
                     argument_types
                         .get(*index)
+                        .cloned()
                         .ok_or_else(|| {
                             format!(
                                 "argument type index {} out of bounds",
                                 index
                             )
-                        })?
-                        .clone();
+                        })?;
 
                 Ok(
                     LoweredValue::Pointer {
@@ -783,131 +859,33 @@ impl<'ctx> Compiler<'ctx> {
             }
 
             Expr::Constant(value) =>
-                self.lower_constant(value),
+                self.lower_constant(
+                    context,
+                    value,
+                ),
 
             Expr::Field {
                 object,
                 name,
-            } => {
-                let object =
-                    self.lower_expr(
-                        builder,
-                        function,
-                        arguments,
-                        argument_types,
-                        expected_type,
-                        object,
-                    )?;
-
-                let (
-                    object_pointer,
-                    object_type,
-                ) =
-                    match object {
-                        LoweredValue::Pointer {
-                            pointer,
-                            type_info,
-                        } => (
-                            pointer,
-                            type_info,
-                        ),
-
-                        LoweredValue::Value(_) => {
-                            return Err(
-                                format!(
-                                    "cannot access field `{}` on a value",
-                                    name
-                                )
-                            );
-                        }
-                    };
-
-                let fields =
-                    match &object_type {
-                        TypeInfo::Struct {
-                            fields,
-                            ..
-                        } => fields,
-
-                        _ => {
-                            return Err(
-                                format!(
-                                    "cannot access field `{}` on non-struct type",
-                                    name
-                                )
-                            );
-                        }
-                    };
-
-                let (
-                    field_index,
-                    field_type,
-                ) =
-                    fields
-                        .iter()
-                        .enumerate()
-                        .find_map(
-                            |(index, field)| {
-                                if field.name == *name {
-                                    Some((
-                                        index,
-                                        field.type_info.clone(),
-                                    ))
-                                } else {
-                                    None
-                                }
-                            },
-                        )
-                        .ok_or_else(|| {
-                            format!(
-                                "field `{}` not found",
-                                name
-                            )
-                        })?;
-
-                let struct_type =
-                    llvm_struct_type(
-                        self.context,
-                        &object_type,
-                    )?;
-
-                let field_pointer =
-                    builder
-                        .build_struct_gep(
-                            struct_type,
-                            object_pointer,
-                            field_index as u32,
-                            &format!(
-                                "{}_ptr",
-                                name
-                            ),
-                        )
-                        .map_err(|error| {
-                            format!(
-                                "failed to build GEP for field `{}`: {:?}",
-                                name,
-                                error
-                            )
-                        })?;
-
-                Ok(
-                    LoweredValue::Pointer {
-                        pointer: field_pointer,
-                        type_info: field_type,
-                    }
-                )
-            }
-
-            // ------------------------------------------------
-            // If / else
-            // ------------------------------------------------
+            } =>
+                self.lower_field(
+                    context,
+                    builder,
+                    function,
+                    arguments,
+                    argument_types,
+                    expected_type,
+                    object,
+                    name,
+                ),
 
             Expr::IfElse {
                 condition,
                 then_branch,
                 else_branch,
-            } => {
+            } =>
                 self.lower_if_else(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -916,11 +894,11 @@ impl<'ctx> Compiler<'ctx> {
                     condition,
                     then_branch,
                     else_branch,
-                )
-            }
+                ),
 
             Expr::Add { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -933,6 +911,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::Sub { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -945,6 +924,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::Mul { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -957,6 +937,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::Div { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -969,6 +950,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::Rem { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -981,6 +963,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::Eq { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -993,6 +976,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::Ne { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -1005,6 +989,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::Lt { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -1017,6 +1002,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::Le { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -1029,6 +1015,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::Gt { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -1041,6 +1028,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::Ge { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -1053,6 +1041,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::And { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -1065,6 +1054,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::Or { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -1077,6 +1067,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::BitAnd { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -1089,6 +1080,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::BitOr { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -1101,6 +1093,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::BitXor { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -1113,6 +1106,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::Shl { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -1125,6 +1119,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::Shr { lhs, rhs } =>
                 self.lower_binary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -1137,6 +1132,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::Not { operand } =>
                 self.lower_unary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -1148,6 +1144,7 @@ impl<'ctx> Compiler<'ctx> {
 
             Expr::Neg { operand } =>
                 self.lower_unary(
+                    context,
                     builder,
                     function,
                     arguments,
@@ -1160,14 +1157,121 @@ impl<'ctx> Compiler<'ctx> {
     }
 
 
-    // --------------------------------------------------------
-    // If / else lowering
-    // --------------------------------------------------------
+    // ========================================================
+    // Field
+    // ========================================================
+
+    fn lower_field(
+        &self,
+        context: &'ctx Context,
+        builder: &Builder<'ctx>,
+        function: FunctionValue<'ctx>,
+        arguments: &[PointerValue<'ctx>],
+        argument_types: &[TypeInfo],
+        expected_type: &TypeInfo,
+        object: &Expr,
+        name: &str,
+    ) -> Result<LoweredValue<'ctx>, String> {
+        let object =
+            self.lower_expr(
+                context,
+                builder,
+                function,
+                arguments,
+                argument_types,
+                expected_type,
+                object,
+            )?;
+
+        let (object_pointer, object_type) =
+            match object {
+                LoweredValue::Pointer {
+                    pointer,
+                    type_info,
+                } => (pointer, type_info),
+
+                LoweredValue::Value(_) =>
+                    return Err(format!(
+                        "cannot access field `{}` on a value",
+                        name
+                    )),
+            };
+
+        let fields =
+            match &object_type {
+                TypeInfo::Struct {
+                    fields,
+                    ..
+                } => fields,
+
+                _ =>
+                    return Err(format!(
+                        "cannot access field `{}` on non-struct type",
+                        name
+                    )),
+            };
+
+        let (field_index, field_type) =
+            fields
+                .iter()
+                .enumerate()
+                .find_map(|(index, field)| {
+                    if field.name == name {
+                        Some((
+                            index,
+                            field.type_info.clone(),
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "field `{}` not found",
+                        name
+                    )
+                })?;
+
+        let struct_type =
+            llvm_struct_type(
+                context,
+                &object_type,
+            )?;
+
+        let field_pointer =
+            builder
+                .build_struct_gep(
+                    struct_type,
+                    object_pointer,
+                    field_index as u32,
+                    &format!("{}_ptr", name),
+                )
+                .map_err(|error| {
+                    format!(
+                        "failed to build GEP for field `{}`: {:?}",
+                        name,
+                        error
+                    )
+                })?;
+
+        Ok(
+            LoweredValue::Pointer {
+                pointer: field_pointer,
+                type_info: field_type,
+            }
+        )
+    }
+
+
+    // ========================================================
+    // If / else
+    // ========================================================
 
     fn lower_if_else(
         &self,
+        context: &'ctx Context,
         builder: &Builder<'ctx>,
-        function: inkwell::values::FunctionValue<'ctx>,
+        function: FunctionValue<'ctx>,
         arguments: &[PointerValue<'ctx>],
         argument_types: &[TypeInfo],
         expected_type: &TypeInfo,
@@ -1177,6 +1281,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<LoweredValue<'ctx>, String> {
         let condition =
             self.lower_expr(
+                context,
                 builder,
                 function,
                 arguments,
@@ -1187,36 +1292,46 @@ impl<'ctx> Compiler<'ctx> {
 
         let condition =
             self.materialize_value(
+                context,
                 builder,
                 condition,
             )?;
 
         let condition =
             match condition {
-                BasicValueEnum::IntValue(value) => value,
-
-                _ => {
-                    return Err(
-                        "if condition must be a boolean/integer value"
-                            .to_string()
-                    );
+                BasicValueEnum::IntValue(value)
+                    if value.get_type().get_bit_width() == 1 =>
+                {
+                    value
                 }
+
+                BasicValueEnum::IntValue(_) =>
+                    return Err(
+                        "if condition must be bool"
+                            .to_string()
+                    ),
+
+                _ =>
+                    return Err(
+                        "if condition must be bool"
+                            .to_string()
+                    ),
             };
 
         let then_block =
-            self.context.append_basic_block(
+            context.append_basic_block(
                 function,
                 "then",
             );
 
         let else_block =
-            self.context.append_basic_block(
+            context.append_basic_block(
                 function,
                 "else",
             );
 
         let merge_block =
-            self.context.append_basic_block(
+            context.append_basic_block(
                 function,
                 "if_merge",
             );
@@ -1242,6 +1357,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let then_value =
             self.lower_expr(
+                context,
                 builder,
                 function,
                 arguments,
@@ -1252,6 +1368,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let then_value =
             self.materialize_value(
+                context,
                 builder,
                 then_value,
             )?;
@@ -1285,6 +1402,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let else_value =
             self.lower_expr(
+                context,
                 builder,
                 function,
                 arguments,
@@ -1295,6 +1413,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let else_value =
             self.materialize_value(
+                context,
                 builder,
                 else_value,
             )?;
@@ -1329,8 +1448,8 @@ impl<'ctx> Compiler<'ctx> {
         let phi =
             builder
                 .build_phi(
-                    expected_type_llvm_type(
-                        self.context,
+                    llvm_type(
+                        context,
                         expected_type,
                     )?,
                     "if_result",
@@ -1343,14 +1462,8 @@ impl<'ctx> Compiler<'ctx> {
                 })?;
 
         phi.add_incoming(&[
-            (
-                &then_value,
-                then_end,
-            ),
-            (
-                &else_value,
-                else_end,
-            ),
+            (&then_value, then_end),
+            (&else_value, else_end),
         ]);
 
         Ok(
@@ -1361,30 +1474,31 @@ impl<'ctx> Compiler<'ctx> {
     }
 
 
-    // --------------------------------------------------------
+    // ========================================================
     // Constants
-    // --------------------------------------------------------
+    // ========================================================
 
     fn lower_constant(
         &self,
+        context: &'ctx Context,
         value: &Value,
     ) -> Result<LoweredValue<'ctx>, String> {
         let value =
             match value {
                 Value::F32(value) =>
-                    self.context
+                    context
                         .f32_type()
                         .const_float(*value as f64)
                         .into(),
 
                 Value::F64(value) =>
-                    self.context
+                    context
                         .f64_type()
                         .const_float(*value)
                         .into(),
 
                 Value::I8(value) =>
-                    self.context
+                    context
                         .i8_type()
                         .const_int(
                             *value as i64 as u64,
@@ -1393,7 +1507,7 @@ impl<'ctx> Compiler<'ctx> {
                         .into(),
 
                 Value::I16(value) =>
-                    self.context
+                    context
                         .i16_type()
                         .const_int(
                             *value as i64 as u64,
@@ -1402,7 +1516,7 @@ impl<'ctx> Compiler<'ctx> {
                         .into(),
 
                 Value::I32(value) =>
-                    self.context
+                    context
                         .i32_type()
                         .const_int(
                             *value as i64 as u64,
@@ -1411,7 +1525,7 @@ impl<'ctx> Compiler<'ctx> {
                         .into(),
 
                 Value::I64(value) =>
-                    self.context
+                    context
                         .i64_type()
                         .const_int(
                             *value as u64,
@@ -1420,7 +1534,7 @@ impl<'ctx> Compiler<'ctx> {
                         .into(),
 
                 Value::I128(value) =>
-                    self.context
+                    context
                         .i128_type()
                         .const_int_arbitrary_precision(
                             &[
@@ -1431,7 +1545,7 @@ impl<'ctx> Compiler<'ctx> {
                         .into(),
 
                 Value::U8(value) =>
-                    self.context
+                    context
                         .i8_type()
                         .const_int(
                             *value as u64,
@@ -1440,7 +1554,7 @@ impl<'ctx> Compiler<'ctx> {
                         .into(),
 
                 Value::U16(value) =>
-                    self.context
+                    context
                         .i16_type()
                         .const_int(
                             *value as u64,
@@ -1449,7 +1563,7 @@ impl<'ctx> Compiler<'ctx> {
                         .into(),
 
                 Value::U32(value) =>
-                    self.context
+                    context
                         .i32_type()
                         .const_int(
                             *value as u64,
@@ -1458,7 +1572,7 @@ impl<'ctx> Compiler<'ctx> {
                         .into(),
 
                 Value::U64(value) =>
-                    self.context
+                    context
                         .i64_type()
                         .const_int(
                             *value,
@@ -1467,7 +1581,7 @@ impl<'ctx> Compiler<'ctx> {
                         .into(),
 
                 Value::U128(value) =>
-                    self.context
+                    context
                         .i128_type()
                         .const_int_arbitrary_precision(
                             &[
@@ -1478,7 +1592,7 @@ impl<'ctx> Compiler<'ctx> {
                         .into(),
 
                 Value::Bool(value) =>
-                    self.context
+                    context
                         .bool_type()
                         .const_int(
                             if *value { 1 } else { 0 },
@@ -1493,14 +1607,15 @@ impl<'ctx> Compiler<'ctx> {
     }
 
 
-    // --------------------------------------------------------
-    // Unary operations
-    // --------------------------------------------------------
+    // ========================================================
+    // Unary
+    // ========================================================
 
     fn lower_unary(
         &self,
+        context: &'ctx Context,
         builder: &Builder<'ctx>,
-        function: inkwell::values::FunctionValue<'ctx>,
+        function: FunctionValue<'ctx>,
         arguments: &[PointerValue<'ctx>],
         argument_types: &[TypeInfo],
         expected_type: &TypeInfo,
@@ -1509,6 +1624,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<LoweredValue<'ctx>, String> {
         let operand =
             self.lower_expr(
+                context,
                 builder,
                 function,
                 arguments,
@@ -1519,6 +1635,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let operand =
             self.materialize_value(
+                context,
                 builder,
                 operand,
             )?;
@@ -1526,7 +1643,16 @@ impl<'ctx> Compiler<'ctx> {
         match operation {
             UnaryOp::Not => {
                 let value =
-                    operand.into_int_value();
+                    match operand {
+                        BasicValueEnum::IntValue(value) =>
+                            value,
+
+                        _ =>
+                            return Err(
+                                "unary ! requires an integer or bool operand"
+                                    .to_string()
+                            ),
+                    };
 
                 let result =
                     builder
@@ -1603,14 +1729,15 @@ impl<'ctx> Compiler<'ctx> {
     }
 
 
-    // --------------------------------------------------------
-    // Binary operations
-    // --------------------------------------------------------
+    // ========================================================
+    // Binary
+    // ========================================================
 
     fn lower_binary(
         &self,
+        context: &'ctx Context,
         builder: &Builder<'ctx>,
-        function: inkwell::values::FunctionValue<'ctx>,
+        function: FunctionValue<'ctx>,
         arguments: &[PointerValue<'ctx>],
         argument_types: &[TypeInfo],
         expected_type: &TypeInfo,
@@ -1619,27 +1746,17 @@ impl<'ctx> Compiler<'ctx> {
         operation: BinaryOp,
     ) -> Result<LoweredValue<'ctx>, String> {
         let operand_type =
-            match operation {
-                BinaryOp::Eq
-                | BinaryOp::Ne
-                | BinaryOp::Lt
-                | BinaryOp::Le
-                | BinaryOp::Gt
-                | BinaryOp::Ge
-                | BinaryOp::And
-                | BinaryOp::Or => {
-                    infer_expression_type(
-                        argument_types,
-                        lhs,
-                        expected_type,
-                    )
-                }
-
-                _ => expected_type.clone(),
-            };
+            binary_operand_type(
+                argument_types,
+                lhs,
+                rhs,
+                expected_type,
+                &operation,
+            )?;
 
         let lhs =
             self.lower_expr(
+                context,
                 builder,
                 function,
                 arguments,
@@ -1650,12 +1767,14 @@ impl<'ctx> Compiler<'ctx> {
 
         let lhs =
             self.materialize_value(
+                context,
                 builder,
                 lhs,
             )?;
 
         let rhs =
             self.lower_expr(
+                context,
                 builder,
                 function,
                 arguments,
@@ -1666,39 +1785,38 @@ impl<'ctx> Compiler<'ctx> {
 
         let rhs =
             self.materialize_value(
+                context,
                 builder,
                 rhs,
             )?;
 
-        match lhs {
-            BasicValueEnum::FloatValue(lhs) => {
-                let rhs =
-                    rhs.into_float_value();
-
+        match (lhs, rhs) {
+            (
+                BasicValueEnum::FloatValue(lhs),
+                BasicValueEnum::FloatValue(rhs),
+            ) =>
                 self.lower_float_binary(
                     builder,
                     lhs,
                     rhs,
                     operation,
-                )
-            }
+                ),
 
-            BasicValueEnum::IntValue(lhs) => {
-                let rhs =
-                    rhs.into_int_value();
-
+            (
+                BasicValueEnum::IntValue(lhs),
+                BasicValueEnum::IntValue(rhs),
+            ) =>
                 self.lower_int_binary(
                     builder,
                     lhs,
                     rhs,
                     operation,
                     &operand_type,
-                )
-            }
+                ),
 
             _ =>
                 Err(
-                    "unsupported binary operand type"
+                    "binary operands must have matching numeric or integer types"
                         .to_string()
                 ),
         }
@@ -1712,109 +1830,121 @@ impl<'ctx> Compiler<'ctx> {
         rhs: FloatValue<'ctx>,
         operation: BinaryOp,
     ) -> Result<LoweredValue<'ctx>, String> {
-        let result =
-            match operation {
-                BinaryOp::Add =>
-                    builder.build_float_add(
-                        lhs,
-                        rhs,
-                        "add",
-                    ),
+        match operation {
+            BinaryOp::Add =>
+                Ok(LoweredValue::Value(
+                    builder
+                        .build_float_add(
+                            lhs,
+                            rhs,
+                            "add",
+                        )
+                        .map_err(|e| format!("{:?}", e))?
+                        .into()
+                )),
 
-                BinaryOp::Sub =>
-                    builder.build_float_sub(
-                        lhs,
-                        rhs,
-                        "sub",
-                    ),
+            BinaryOp::Sub =>
+                Ok(LoweredValue::Value(
+                    builder
+                        .build_float_sub(
+                            lhs,
+                            rhs,
+                            "sub",
+                        )
+                        .map_err(|e| format!("{:?}", e))?
+                        .into()
+                )),
 
-                BinaryOp::Mul =>
-                    builder.build_float_mul(
-                        lhs,
-                        rhs,
-                        "mul",
-                    ),
+            BinaryOp::Mul =>
+                Ok(LoweredValue::Value(
+                    builder
+                        .build_float_mul(
+                            lhs,
+                            rhs,
+                            "mul",
+                        )
+                        .map_err(|e| format!("{:?}", e))?
+                        .into()
+                )),
 
-                BinaryOp::Div =>
-                    builder.build_float_div(
-                        lhs,
-                        rhs,
-                        "div",
-                    ),
+            BinaryOp::Div =>
+                Ok(LoweredValue::Value(
+                    builder
+                        .build_float_div(
+                            lhs,
+                            rhs,
+                            "div",
+                        )
+                        .map_err(|e| format!("{:?}", e))?
+                        .into()
+                )),
 
-                BinaryOp::Rem =>
-                    builder.build_float_rem(
-                        lhs,
-                        rhs,
-                        "rem",
-                    ),
+            BinaryOp::Rem =>
+                Ok(LoweredValue::Value(
+                    builder
+                        .build_float_rem(
+                            lhs,
+                            rhs,
+                            "rem",
+                        )
+                        .map_err(|e| format!("{:?}", e))?
+                        .into()
+                )),
 
-                BinaryOp::Eq =>
-                    return self.float_compare(
-                        builder,
-                        lhs,
-                        rhs,
-                        FloatPredicate::OEQ,
-                    ),
+            BinaryOp::Eq =>
+                self.float_compare(
+                    builder,
+                    lhs,
+                    rhs,
+                    FloatPredicate::OEQ,
+                ),
 
-                BinaryOp::Ne =>
-                    return self.float_compare(
-                        builder,
-                        lhs,
-                        rhs,
-                        FloatPredicate::ONE,
-                    ),
+            BinaryOp::Ne =>
+                self.float_compare(
+                    builder,
+                    lhs,
+                    rhs,
+                    FloatPredicate::ONE,
+                ),
 
-                BinaryOp::Lt =>
-                    return self.float_compare(
-                        builder,
-                        lhs,
-                        rhs,
-                        FloatPredicate::OLT,
-                    ),
+            BinaryOp::Lt =>
+                self.float_compare(
+                    builder,
+                    lhs,
+                    rhs,
+                    FloatPredicate::OLT,
+                ),
 
-                BinaryOp::Le =>
-                    return self.float_compare(
-                        builder,
-                        lhs,
-                        rhs,
-                        FloatPredicate::OLE,
-                    ),
+            BinaryOp::Le =>
+                self.float_compare(
+                    builder,
+                    lhs,
+                    rhs,
+                    FloatPredicate::OLE,
+                ),
 
-                BinaryOp::Gt =>
-                    return self.float_compare(
-                        builder,
-                        lhs,
-                        rhs,
-                        FloatPredicate::OGT,
-                    ),
+            BinaryOp::Gt =>
+                self.float_compare(
+                    builder,
+                    lhs,
+                    rhs,
+                    FloatPredicate::OGT,
+                ),
 
-                BinaryOp::Ge =>
-                    return self.float_compare(
-                        builder,
-                        lhs,
-                        rhs,
-                        FloatPredicate::OGE,
-                    ),
+            BinaryOp::Ge =>
+                self.float_compare(
+                    builder,
+                    lhs,
+                    rhs,
+                    FloatPredicate::OGE,
+                ),
 
-                _ =>
-                    return Err(
-                        "unsupported floating-point operator"
-                            .to_string()
-                    ),
-            }
-            .map_err(|e| {
-                format!(
-                    "failed to build floating-point operation: {:?}",
-                    e
-                )
-            })?;
-
-        Ok(
-            LoweredValue::Value(
-                result.into()
-            )
-        )
+            _ =>
+                Err(
+                    "unsupported floating-point operator"
+                        .to_string()
+                ),
+        }
     }
 
 
@@ -1862,227 +1992,171 @@ impl<'ctx> Compiler<'ctx> {
         let result =
             match operation {
                 BinaryOp::Add =>
-                    builder
-                        .build_int_add(
-                            lhs,
-                            rhs,
-                            "add",
-                        )
-                        .map(|v| v.into()),
+                    builder.build_int_add(
+                        lhs,
+                        rhs,
+                        "add",
+                    ),
 
                 BinaryOp::Sub =>
-                    builder
-                        .build_int_sub(
-                            lhs,
-                            rhs,
-                            "sub",
-                        )
-                        .map(|v| v.into()),
+                    builder.build_int_sub(
+                        lhs,
+                        rhs,
+                        "sub",
+                    ),
 
                 BinaryOp::Mul =>
-                    builder
-                        .build_int_mul(
-                            lhs,
-                            rhs,
-                            "mul",
-                        )
-                        .map(|v| v.into()),
+                    builder.build_int_mul(
+                        lhs,
+                        rhs,
+                        "mul",
+                    ),
 
                 BinaryOp::Div => {
                     if unsigned {
-                        builder
-                            .build_int_unsigned_div(
-                                lhs,
-                                rhs,
-                                "div",
-                            )
-                            .map(|v| v.into())
+                        builder.build_int_unsigned_div(
+                            lhs,
+                            rhs,
+                            "div",
+                        )
                     } else {
-                        builder
-                            .build_int_signed_div(
-                                lhs,
-                                rhs,
-                                "div",
-                            )
-                            .map(|v| v.into())
+                        builder.build_int_signed_div(
+                            lhs,
+                            rhs,
+                            "div",
+                        )
                     }
                 }
 
                 BinaryOp::Rem => {
                     if unsigned {
-                        builder
-                            .build_int_unsigned_rem(
-                                lhs,
-                                rhs,
-                                "rem",
-                            )
-                            .map(|v| v.into())
+                        builder.build_int_unsigned_rem(
+                            lhs,
+                            rhs,
+                            "rem",
+                        )
                     } else {
-                        builder
-                            .build_int_signed_rem(
-                                lhs,
-                                rhs,
-                                "rem",
-                            )
-                            .map(|v| v.into())
+                        builder.build_int_signed_rem(
+                            lhs,
+                            rhs,
+                            "rem",
+                        )
                     }
                 }
 
                 BinaryOp::Eq =>
-                    builder
-                        .build_int_compare(
-                            IntPredicate::EQ,
-                            lhs,
-                            rhs,
-                            "eq",
-                        )
-                        .map(|v| v.into()),
+                    builder.build_int_compare(
+                        IntPredicate::EQ,
+                        lhs,
+                        rhs,
+                        "eq",
+                    ),
 
                 BinaryOp::Ne =>
-                    builder
-                        .build_int_compare(
-                            IntPredicate::NE,
-                            lhs,
-                            rhs,
-                            "ne",
-                        )
-                        .map(|v| v.into()),
+                    builder.build_int_compare(
+                        IntPredicate::NE,
+                        lhs,
+                        rhs,
+                        "ne",
+                    ),
 
-                BinaryOp::Lt => {
-                    let predicate =
+                BinaryOp::Lt =>
+                    builder.build_int_compare(
                         if unsigned {
                             IntPredicate::ULT
                         } else {
                             IntPredicate::SLT
-                        };
+                        },
+                        lhs,
+                        rhs,
+                        "lt",
+                    ),
 
-                    builder
-                        .build_int_compare(
-                            predicate,
-                            lhs,
-                            rhs,
-                            "lt",
-                        )
-                        .map(|v| v.into())
-                }
-
-                BinaryOp::Le => {
-                    let predicate =
+                BinaryOp::Le =>
+                    builder.build_int_compare(
                         if unsigned {
                             IntPredicate::ULE
                         } else {
                             IntPredicate::SLE
-                        };
+                        },
+                        lhs,
+                        rhs,
+                        "le",
+                    ),
 
-                    builder
-                        .build_int_compare(
-                            predicate,
-                            lhs,
-                            rhs,
-                            "le",
-                        )
-                        .map(|v| v.into())
-                }
-
-                BinaryOp::Gt => {
-                    let predicate =
+                BinaryOp::Gt =>
+                    builder.build_int_compare(
                         if unsigned {
                             IntPredicate::UGT
                         } else {
                             IntPredicate::SGT
-                        };
+                        },
+                        lhs,
+                        rhs,
+                        "gt",
+                    ),
 
-                    builder
-                        .build_int_compare(
-                            predicate,
-                            lhs,
-                            rhs,
-                            "gt",
-                        )
-                        .map(|v| v.into())
-                }
-
-                BinaryOp::Ge => {
-                    let predicate =
+                BinaryOp::Ge =>
+                    builder.build_int_compare(
                         if unsigned {
                             IntPredicate::UGE
                         } else {
                             IntPredicate::SGE
-                        };
-
-                    builder
-                        .build_int_compare(
-                            predicate,
-                            lhs,
-                            rhs,
-                            "ge",
-                        )
-                        .map(|v| v.into())
-                }
+                        },
+                        lhs,
+                        rhs,
+                        "ge",
+                    ),
 
                 BinaryOp::And =>
-                    builder
-                        .build_and(
-                            lhs,
-                            rhs,
-                            "and",
-                        )
-                        .map(|v| v.into()),
+                    builder.build_and(
+                        lhs,
+                        rhs,
+                        "and",
+                    ),
 
                 BinaryOp::Or =>
-                    builder
-                        .build_or(
-                            lhs,
-                            rhs,
-                            "or",
-                        )
-                        .map(|v| v.into()),
+                    builder.build_or(
+                        lhs,
+                        rhs,
+                        "or",
+                    ),
 
                 BinaryOp::BitAnd =>
-                    builder
-                        .build_and(
-                            lhs,
-                            rhs,
-                            "bitand",
-                        )
-                        .map(|v| v.into()),
+                    builder.build_and(
+                        lhs,
+                        rhs,
+                        "bitand",
+                    ),
 
                 BinaryOp::BitOr =>
-                    builder
-                        .build_or(
-                            lhs,
-                            rhs,
-                            "bitor",
-                        )
-                        .map(|v| v.into()),
+                    builder.build_or(
+                        lhs,
+                        rhs,
+                        "bitor",
+                    ),
 
                 BinaryOp::BitXor =>
-                    builder
-                        .build_xor(
-                            lhs,
-                            rhs,
-                            "bitxor",
-                        )
-                        .map(|v| v.into()),
+                    builder.build_xor(
+                        lhs,
+                        rhs,
+                        "bitxor",
+                    ),
 
                 BinaryOp::Shl =>
-                    builder
-                        .build_left_shift(
-                            lhs,
-                            rhs,
-                            "shl",
-                        )
-                        .map(|v| v.into()),
+                    builder.build_left_shift(
+                        lhs,
+                        rhs,
+                        "shl",
+                    ),
 
                 BinaryOp::Shr =>
-                    builder
-                        .build_right_shift(
-                            lhs,
-                            rhs,
-                            !unsigned,
-                            "shr",
-                        )
-                        .map(|v| v.into()),
+                    builder.build_right_shift(
+                        lhs,
+                        rhs,
+                        !unsigned,
+                        "shr",
+                    ),
             }
             .map_err(|e| {
                 format!(
@@ -2092,17 +2166,20 @@ impl<'ctx> Compiler<'ctx> {
             })?;
 
         Ok(
-            LoweredValue::Value(result)
+            LoweredValue::Value(
+                result.into()
+            )
         )
     }
 
 
-    // --------------------------------------------------------
-    // Materialize pointer -> value
-    // --------------------------------------------------------
+    // ========================================================
+    // Materialize
+    // ========================================================
 
     fn materialize_value(
         &self,
+        context: &'ctx Context,
         builder: &Builder<'ctx>,
         value: LoweredValue<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
@@ -2116,7 +2193,7 @@ impl<'ctx> Compiler<'ctx> {
             } => {
                 let llvm_type =
                     llvm_type(
-                        self.context,
+                        context,
                         &type_info,
                     )?;
 
@@ -2139,6 +2216,61 @@ impl<'ctx> Compiler<'ctx> {
 
 
 // ============================================================
+// Function type helper
+// ============================================================
+
+fn basic_type_fn_type<'ctx>(
+    return_type: BasicTypeEnum<'ctx>,
+    argument_pointer_type:
+        inkwell::types::PointerType<'ctx>,
+) -> inkwell::types::FunctionType<'ctx> {
+    match return_type {
+        BasicTypeEnum::ArrayType(ty) =>
+            ty.fn_type(
+                &[argument_pointer_type.into()],
+                false,
+            ),
+
+        BasicTypeEnum::FloatType(ty) =>
+            ty.fn_type(
+                &[argument_pointer_type.into()],
+                false,
+            ),
+
+        BasicTypeEnum::IntType(ty) =>
+            ty.fn_type(
+                &[argument_pointer_type.into()],
+                false,
+            ),
+
+        BasicTypeEnum::PointerType(ty) =>
+            ty.fn_type(
+                &[argument_pointer_type.into()],
+                false,
+            ),
+
+        BasicTypeEnum::StructType(ty) =>
+            ty.fn_type(
+                &[argument_pointer_type.into()],
+                false,
+            ),
+
+        BasicTypeEnum::VectorType(ty) =>
+            ty.fn_type(
+                &[argument_pointer_type.into()],
+                false,
+            ),
+
+        BasicTypeEnum::ScalableVectorType(ty) =>
+            ty.fn_type(
+                &[argument_pointer_type.into()],
+                false,
+            ),
+    }
+}
+
+
+// ============================================================
 // Lowered value
 // ============================================================
 
@@ -2156,6 +2288,7 @@ enum LoweredValue<'ctx> {
 // Operators
 // ============================================================
 
+#[derive(Debug, Clone, Copy)]
 enum BinaryOp {
     Add,
     Sub,
@@ -2181,6 +2314,7 @@ enum BinaryOp {
 }
 
 
+#[derive(Debug, Clone, Copy)]
 enum UnaryOp {
     Not,
     Neg,
@@ -2202,24 +2336,19 @@ fn llvm_type<'ctx>(
         TypeInfo::F64 =>
             Ok(context.f64_type().into()),
 
-        TypeInfo::I8 |
-        TypeInfo::U8 =>
+        TypeInfo::I8 | TypeInfo::U8 =>
             Ok(context.i8_type().into()),
 
-        TypeInfo::I16 |
-        TypeInfo::U16 =>
+        TypeInfo::I16 | TypeInfo::U16 =>
             Ok(context.i16_type().into()),
 
-        TypeInfo::I32 |
-        TypeInfo::U32 =>
+        TypeInfo::I32 | TypeInfo::U32 =>
             Ok(context.i32_type().into()),
 
-        TypeInfo::I64 |
-        TypeInfo::U64 =>
+        TypeInfo::I64 | TypeInfo::U64 =>
             Ok(context.i64_type().into()),
 
-        TypeInfo::I128 |
-        TypeInfo::U128 =>
+        TypeInfo::I128 | TypeInfo::U128 =>
             Ok(context.i128_type().into()),
 
         TypeInfo::Bool =>
@@ -2254,22 +2383,7 @@ fn llvm_type<'ctx>(
 
 
 // ============================================================
-// TypeInfo -> LLVM type
-//
-// Kept separate from llvm_type() so the if/else PHI creation
-// has an explicit expected result type.
-// ============================================================
-
-fn expected_type_llvm_type<'ctx>(
-    context: &'ctx Context,
-    type_info: &TypeInfo,
-) -> Result<BasicTypeEnum<'ctx>, String> {
-    llvm_type(context, type_info)
-}
-
-
-// ============================================================
-// TypeInfo -> StructType
+// Struct type
 // ============================================================
 
 fn llvm_struct_type<'ctx>(
@@ -2280,9 +2394,7 @@ fn llvm_struct_type<'ctx>(
         context,
         type_info,
     )? {
-        BasicTypeEnum::StructType(
-            struct_type,
-        ) =>
+        BasicTypeEnum::StructType(struct_type) =>
             Ok(struct_type),
 
         _ =>
@@ -2297,45 +2409,25 @@ fn llvm_struct_type<'ctx>(
 // ============================================================
 // Expression type inference
 // ============================================================
-//
-// This is important for if/else conditions:
-//
-//     |x: i32| -> i32 {
-//         if x > 10 {
-//             ...
-//         } else {
-//             ...
-//         }
-//     }
-//
-// The comparison must use i32 for `10`, even though the entire
-// comparison produces bool.
-//
-// For an if/else:
-//
-//     if x > 10 {
-//         100
-//     } else {
-//         200
-//     }
-//
-// the branches must use the closure's return type (i32).
-// ============================================================
 
-fn infer_expression_type(
+fn expression_type(
     argument_types: &[TypeInfo],
     expr: &Expr,
-    fallback: &TypeInfo,
-) -> TypeInfo {
+) -> Result<TypeInfo, String> {
     match expr {
         Expr::Argument(index) =>
             argument_types
                 .get(*index)
                 .cloned()
-                .unwrap_or_else(|| fallback.clone()),
+                .ok_or_else(|| {
+                    format!(
+                        "argument index {} out of bounds",
+                        index
+                    )
+                }),
 
         Expr::Constant(value) =>
-            match value {
+            Ok(match value {
                 Value::F32(_) => TypeInfo::F32,
                 Value::F64(_) => TypeInfo::F64,
 
@@ -2352,21 +2444,43 @@ fn infer_expression_type(
                 Value::U128(_) => TypeInfo::U128,
 
                 Value::Bool(_) => TypeInfo::Bool,
-            },
+            }),
 
-        Expr::Field { .. } =>
-            fallback.clone(),
+        Expr::Field {
+            object,
+            name,
+        } => {
+            let object_type =
+                expression_type(
+                    argument_types,
+                    object,
+                )?;
 
-        Expr::Eq { .. }
-        | Expr::Ne { .. }
-        | Expr::Lt { .. }
-        | Expr::Le { .. }
-        | Expr::Gt { .. }
-        | Expr::Ge { .. }
-        | Expr::And { .. }
-        | Expr::Or { .. }
-        | Expr::Not { .. } =>
-            TypeInfo::Bool,
+            let fields =
+                match object_type {
+                    TypeInfo::Struct {
+                        fields,
+                        ..
+                    } => fields,
+
+                    _ =>
+                        return Err(format!(
+                            "cannot access field `{}` on non-struct type",
+                            name
+                        )),
+                };
+
+            fields
+                .into_iter()
+                .find(|field| field.name == *name)
+                .map(|field| field.type_info)
+                .ok_or_else(|| {
+                    format!(
+                        "field `{}` not found",
+                        name
+                    )
+                })
+        }
 
         Expr::Add { lhs, .. }
         | Expr::Sub { lhs, .. }
@@ -2379,20 +2493,125 @@ fn infer_expression_type(
         | Expr::Shl { lhs, .. }
         | Expr::Shr { lhs, .. }
         | Expr::Neg { operand: lhs } =>
-            infer_expression_type(
+            expression_type(
                 argument_types,
                 lhs,
-                fallback,
             ),
+
+        Expr::Eq { .. }
+        | Expr::Ne { .. }
+        | Expr::Lt { .. }
+        | Expr::Le { .. }
+        | Expr::Gt { .. }
+        | Expr::Ge { .. }
+        | Expr::And { .. }
+        | Expr::Or { .. }
+        | Expr::Not { .. } =>
+            Ok(TypeInfo::Bool),
 
         Expr::IfElse {
             then_branch,
+            else_branch,
             ..
-        } =>
-            infer_expression_type(
-                argument_types,
-                then_branch,
-                fallback,
-            ),
+        } => {
+            let then_type =
+                expression_type(
+                    argument_types,
+                    then_branch,
+                )?;
+
+            let else_type =
+                expression_type(
+                    argument_types,
+                    else_branch,
+                )?;
+
+            if then_type != else_type {
+                return Err(
+                    "if/else branches must have the same type"
+                        .to_string()
+                );
+            }
+
+            Ok(then_type)
+        }
+    }
+}
+
+
+// ============================================================
+// Binary operand type
+// ============================================================
+
+fn binary_operand_type(
+    argument_types: &[TypeInfo],
+    lhs: &Expr,
+    rhs: &Expr,
+    expected_type: &TypeInfo,
+    operation: &BinaryOp,
+) -> Result<TypeInfo, String> {
+    let lhs_type =
+        expression_type(
+            argument_types,
+            lhs,
+        )?;
+
+    let rhs_type =
+        expression_type(
+            argument_types,
+            rhs,
+        )?;
+
+    match operation {
+        BinaryOp::Eq
+        | BinaryOp::Ne
+        | BinaryOp::Lt
+        | BinaryOp::Le
+        | BinaryOp::Gt
+        | BinaryOp::Ge => {
+            if lhs_type != rhs_type {
+                return Err(
+                    "comparison operands must have the same type"
+                        .to_string()
+                );
+            }
+
+            Ok(lhs_type)
+        }
+
+        BinaryOp::And | BinaryOp::Or => {
+            if !lhs_type.is_bool()
+                || !rhs_type.is_bool()
+            {
+                return Err(
+                    "logical &&/|| operands must be bool"
+                        .to_string()
+                );
+            }
+
+            Ok(TypeInfo::Bool)
+        }
+
+        _ => {
+            if lhs_type != rhs_type {
+                return Err(
+                    "binary operands must have the same type"
+                        .to_string()
+                );
+            }
+
+            if !lhs_type.is_numeric()
+                && !lhs_type.is_bool()
+            {
+                return Err(
+                    "unsupported binary operand type"
+                        .to_string()
+                );
+            }
+
+            let _ = expected_type;
+
+            Ok(lhs_type)
+        }
     }
 }
