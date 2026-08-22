@@ -8,6 +8,13 @@ mod tests {
     // Multiple arguments
     // ============================================================
     #[test]
+    fn test_four_arguments_add() {
+        let compiled = compile_closure!(|w: i32, x: i32, y: i32, z: i32| -> i32 { w + x + y + z});
+
+        assert_eq!(call!(compiled, 2, 3, 4, 5), 14);
+    }
+
+    #[test]
     fn test_two_arguments_add() {
         let compiled = compile_closure!(|x: i32, y: i32| -> i32 { x + y });
 
