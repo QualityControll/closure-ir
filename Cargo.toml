@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "closure-llvm",
+    "closure-llvm-macro",
+    "example",
+]
+
+resolver = "2"

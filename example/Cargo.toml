@@ -1,0 +1,14 @@
+[package]
+name = "example"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+closure-llvm = {
+    path = "../closure-llvm"
+}
+
+inkwell = {
+    version = "0.10.0",
+    features = ["llvm22-1"]
+}
