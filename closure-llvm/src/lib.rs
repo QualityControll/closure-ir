@@ -1,24 +1,18 @@
+use std::marker::PhantomData;
+
 use inkwell::{
     builder::Builder,
     context::Context,
     execution_engine::ExecutionEngine,
     module::Module,
-    types::{
-        BasicMetadataTypeEnum,
-        BasicTypeEnum,
-        FunctionType,
-    },
-    values::{
-        BasicValueEnum,
-        FloatValue,
-        IntValue,
-        PointerValue,
-    },
+    types::{BasicTypeEnum, StructType},
+    values::{BasicValueEnum, PointerValue},
     AddressSpace,
     OptimizationLevel,
 };
 
 pub use closure_llvm_macro::{
+    call,
     compile_closure,
     CompileType,
 };
@@ -30,31 +24,21 @@ pub use closure_llvm_macro::{
 
 #[derive(Debug, Clone)]
 pub enum TypeInfo {
-    I32,
-    I64,
-    F32,
     F64,
+    I32,
     Bool,
 
     Struct {
-        name: &'static str,
-        fields: &'static [FieldInfo],
+        name: String,
+        fields: Vec<FieldInfo>,
     },
 }
 
 
 #[derive(Debug, Clone)]
 pub struct FieldInfo {
-    pub name: &'static str,
-
-    pub type_info: fn() -> TypeInfo,
-}
-
-
-impl FieldInfo {
-    pub fn ty(&self) -> TypeInfo {
-        (self.type_info)()
-    }
+    pub name: String,
+    pub type_info: TypeInfo,
 }
 
 
@@ -72,47 +56,8 @@ pub trait CompileType {
 
 
 // ============================================================
-// Primitive types
+// Primitive CompileType implementations
 // ============================================================
-
-impl CompileType for i32 {
-    fn type_info() -> TypeInfo {
-        TypeInfo::I32
-    }
-
-    fn llvm_type<'ctx>(
-        context: &'ctx Context,
-    ) -> BasicTypeEnum<'ctx> {
-        context.i32_type().into()
-    }
-}
-
-
-impl CompileType for i64 {
-    fn type_info() -> TypeInfo {
-        TypeInfo::I64
-    }
-
-    fn llvm_type<'ctx>(
-        context: &'ctx Context,
-    ) -> BasicTypeEnum<'ctx> {
-        context.i64_type().into()
-    }
-}
-
-
-impl CompileType for f32 {
-    fn type_info() -> TypeInfo {
-        TypeInfo::F32
-    }
-
-    fn llvm_type<'ctx>(
-        context: &'ctx Context,
-    ) -> BasicTypeEnum<'ctx> {
-        context.f32_type().into()
-    }
-}
-
 
 impl CompileType for f64 {
     fn type_info() -> TypeInfo {
@@ -123,6 +68,19 @@ impl CompileType for f64 {
         context: &'ctx Context,
     ) -> BasicTypeEnum<'ctx> {
         context.f64_type().into()
+    }
+}
+
+
+impl CompileType for i32 {
+    fn type_info() -> TypeInfo {
+        TypeInfo::I32
+    }
+
+    fn llvm_type<'ctx>(
+        context: &'ctx Context,
+    ) -> BasicTypeEnum<'ctx> {
+        context.i32_type().into()
     }
 }
 
@@ -141,40 +99,14 @@ impl CompileType for bool {
 
 
 // ============================================================
-// TypeInfo -> LLVM
+// Runtime values
 // ============================================================
 
-impl TypeInfo {
-    pub fn llvm_type<'ctx>(
-        &self,
-        context: &'ctx Context,
-    ) -> BasicTypeEnum<'ctx> {
-        match self {
-            TypeInfo::I32 => context.i32_type().into(),
-
-            TypeInfo::I64 => context.i64_type().into(),
-
-            TypeInfo::F32 => context.f32_type().into(),
-
-            TypeInfo::F64 => context.f64_type().into(),
-
-            TypeInfo::Bool => context.bool_type().into(),
-
-            TypeInfo::Struct { fields, .. } => {
-                let llvm_fields: Vec<BasicTypeEnum<'ctx>> =
-                    fields
-                        .iter()
-                        .map(|field| {
-                            field.ty().llvm_type(context)
-                        })
-                        .collect();
-
-                context
-                    .struct_type(&llvm_fields, false)
-                    .into()
-            }
-        }
-    }
+#[derive(Debug)]
+pub enum Value {
+    F64(f64),
+    I32(i32),
+    Bool(bool),
 }
 
 
@@ -182,17 +114,7 @@ impl TypeInfo {
 // Expression IR
 // ============================================================
 
-#[derive(Debug, Clone)]
-pub enum Value {
-    I32(i32),
-    I64(i64),
-    F32(f32),
-    F64(f64),
-    Bool(bool),
-}
-
-
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Expr {
     Argument(usize),
 
@@ -222,24 +144,108 @@ pub enum Expr {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-
-    Neg {
-        value: Box<Expr>,
-    },
 }
 
 
 // ============================================================
-// Closure IR
+// Closure description
 // ============================================================
 
-#[derive(Debug, Clone)]
 pub struct Closure {
     pub arguments: Vec<TypeInfo>,
-
     pub return_type: TypeInfo,
-
     pub body: Expr,
+}
+
+
+// ============================================================
+// Compiled closure
+// ============================================================
+
+pub struct CompiledClosure<'ctx, Args, Ret> {
+    engine: ExecutionEngine<'ctx>,
+    function_name: String,
+
+    _marker: PhantomData<fn(Args) -> Ret>,
+}
+
+
+impl<'ctx, Args, Ret>
+    CompiledClosure<'ctx, Args, Ret>
+{
+    fn new(
+        engine: ExecutionEngine<'ctx>,
+        function_name: String,
+    ) -> Self {
+        Self {
+            engine,
+            function_name,
+            _marker: PhantomData,
+        }
+    }
+
+
+    // --------------------------------------------------------
+    // Call the JIT function
+    // --------------------------------------------------------
+
+    pub unsafe fn call(
+        &self,
+        value: &Args,
+    ) -> Ret
+    where
+        Args: CompileType,
+        Ret: CompileType,
+    {
+        jit_call::<Args, Ret>(
+            &self.engine,
+            &self.function_name,
+            value,
+        )
+    }
+}
+
+
+// ============================================================
+// Generic JIT invocation
+// ============================================================
+
+unsafe fn jit_call<Args, Ret>(
+    engine: &ExecutionEngine<'_>,
+    function_name: &str,
+    value: &Args,
+) -> Ret
+where
+    Args: CompileType,
+    Ret: CompileType,
+{
+    let address =
+        engine
+            .get_function_address(
+                function_name,
+            )
+            .expect(
+                "failed to get JIT function address",
+            );
+
+
+    type JitFn<Ret> =
+        unsafe extern "C" fn(
+            *const u8,
+        ) -> Ret;
+
+
+    let function:
+        JitFn<Ret> =
+        std::mem::transmute(
+            address,
+        );
+
+
+    function(
+        value as *const Args
+            as *const u8,
+    )
 }
 
 
@@ -252,171 +258,185 @@ pub struct Compiler<'ctx> {
 }
 
 
-pub struct CompiledClosure<'ctx> {
-    pub engine: ExecutionEngine<'ctx>,
-
-    pub function_name: String,
-}
-
-
 impl<'ctx> Compiler<'ctx> {
     pub fn new(
         context: &'ctx Context,
     ) -> Self {
-        Self { context }
-    }
-
-
-    // ========================================================
-    // Argument ABI
-    // ========================================================
-
-    fn llvm_argument_type(
-        &self,
-        ty: &TypeInfo,
-    ) -> BasicMetadataTypeEnum<'ctx> {
-        match ty {
-            TypeInfo::Struct { .. } => {
-                self.context
-                    .ptr_type(AddressSpace::default())
-                    .into()
-            }
-
-            TypeInfo::I32 => {
-                self.context.i32_type().into()
-            }
-
-            TypeInfo::I64 => {
-                self.context.i64_type().into()
-            }
-
-            TypeInfo::F32 => {
-                self.context.f32_type().into()
-            }
-
-            TypeInfo::F64 => {
-                self.context.f64_type().into()
-            }
-
-            TypeInfo::Bool => {
-                self.context.bool_type().into()
-            }
+        Self {
+            context,
         }
     }
 
 
-    // ========================================================
-    // Return type
-    // ========================================================
+    // --------------------------------------------------------
+    // Compile
+    // --------------------------------------------------------
 
-    fn llvm_function_type(
-        &self,
-        return_type: &TypeInfo,
-        arguments: &[BasicMetadataTypeEnum<'ctx>],
-    ) -> Result<FunctionType<'ctx>, String> {
-        match return_type {
-            TypeInfo::I32 => {
-                Ok(
-                    self.context
-                        .i32_type()
-                        .fn_type(arguments, false)
-                )
-            }
-
-            TypeInfo::I64 => {
-                Ok(
-                    self.context
-                        .i64_type()
-                        .fn_type(arguments, false)
-                )
-            }
-
-            TypeInfo::F32 => {
-                Ok(
-                    self.context
-                        .f32_type()
-                        .fn_type(arguments, false)
-                )
-            }
-
-            TypeInfo::F64 => {
-                Ok(
-                    self.context
-                        .f64_type()
-                        .fn_type(arguments, false)
-                )
-            }
-
-            TypeInfo::Bool => {
-                Ok(
-                    self.context
-                        .bool_type()
-                        .fn_type(arguments, false)
-                )
-            }
-
-            TypeInfo::Struct { .. } => {
-                Err(
-                    "struct return values are not yet supported"
-                        .to_string()
-                )
-            }
-        }
-    }
-
-
-    // ========================================================
-    // Compile closure
-    // ========================================================
-
-    pub fn compile(
+    pub fn compile<Args, Ret>(
         &self,
         closure: &Closure,
-    ) -> Result<CompiledClosure<'ctx>, String> {
+    ) -> Result<
+        CompiledClosure<'ctx, Args, Ret>,
+        String,
+    >
+    where
+        Args: CompileType,
+        Ret: CompileType,
+    {
+        if closure.arguments.len() != 1 {
+            return Err(
+                "only one closure argument is currently supported"
+                    .to_string(),
+            );
+        }
+
+
         let module =
-            self.context.create_module("closure");
-
-        let builder =
-            self.context.create_builder();
-
-
-        // ----------------------------------------------------
-        // Argument types
-        // ----------------------------------------------------
-
-        let argument_types:
-            Vec<BasicMetadataTypeEnum<'ctx>> =
-            closure
-                .arguments
-                .iter()
-                .map(|ty| {
-                    self.llvm_argument_type(ty)
-                })
-                .collect();
+            self.context.create_module(
+                "closure_module",
+            );
 
 
-        // ----------------------------------------------------
-        // Function type
-        // ----------------------------------------------------
+        let function_name =
+            "compiled_closure";
 
-        let function_type =
-            self.llvm_function_type(
+
+        self.generate_function(
+            &module,
+            function_name,
+            closure,
+        )?;
+
+
+        println!(
+            "Generated LLVM IR:\n{}",
+            module
+                .print_to_string()
+                .to_string()
+        );
+
+
+        let engine =
+            module
+                .create_jit_execution_engine(
+                    OptimizationLevel::None,
+                )
+                .map_err(|error| {
+                    format!(
+                        "failed to create JIT: {:?}",
+                        error
+                    )
+                })?;
+
+
+        Ok(
+            CompiledClosure::new(
+                engine,
+                function_name.to_string(),
+            )
+        )
+    }
+
+
+    // --------------------------------------------------------
+    // Generate LLVM function
+    // --------------------------------------------------------
+
+    fn generate_function(
+        &self,
+        module: &Module<'ctx>,
+        function_name: &str,
+        closure: &Closure,
+    ) -> Result<(), String> {
+        if closure.arguments.len() != 1 {
+            return Err(
+                "only one closure argument is currently supported"
+                    .to_string(),
+            );
+        }
+
+
+        let return_type =
+            llvm_type(
+                self.context,
                 &closure.return_type,
-                &argument_types,
             )?;
 
 
-        let function =
-            module.add_function(
-                "closure",
-                function_type,
-                None,
+        // LLVM 15+ uses opaque pointers.
+        let argument_pointer_type =
+            self.context.ptr_type(
+                AddressSpace::default(),
             );
 
 
         // ----------------------------------------------------
-        // Entry block
+        // Inkwell 0.10.0:
+        //
+        // BasicTypeEnum itself does not provide fn_type().
+        //
+        // We must unwrap the concrete BasicTypeEnum variant
+        // and call fn_type() on that concrete type.
         // ----------------------------------------------------
+
+        let function_type =
+            match return_type {
+
+                BasicTypeEnum::FloatType(
+                    ty
+                ) => {
+                    ty.fn_type(
+                        &[
+                            argument_pointer_type
+                                .into(),
+                        ],
+                        false,
+                    )
+                }
+
+
+                BasicTypeEnum::IntType(
+                    ty
+                ) => {
+                    ty.fn_type(
+                        &[
+                            argument_pointer_type
+                                .into(),
+                        ],
+                        false,
+                    )
+                }
+
+
+                BasicTypeEnum::StructType(
+                    ty
+                ) => {
+                    ty.fn_type(
+                        &[
+                            argument_pointer_type
+                                .into(),
+                        ],
+                        false,
+                    )
+                }
+
+
+                _ => {
+                    return Err(
+                        "unsupported return type for JIT function"
+                            .to_string(),
+                    );
+                }
+            };
+
+
+        let function =
+            module.add_function(
+                function_name,
+                function_type,
+                None,
+            );
+
 
         let entry =
             self.context.append_basic_block(
@@ -424,445 +444,99 @@ impl<'ctx> Compiler<'ctx> {
                 "entry",
             );
 
-        builder.position_at_end(entry);
+
+        let builder =
+            self.context.create_builder();
 
 
-        // ----------------------------------------------------
-        // Arguments
-        // ----------------------------------------------------
+        builder.position_at_end(
+            entry,
+        );
+
+
+        let argument =
+            function
+                .get_nth_param(0)
+                .ok_or_else(|| {
+                    "missing function argument"
+                        .to_string()
+                })?
+                .into_pointer_value();
+
 
         let arguments =
-            function
-                .get_param_iter()
-                .collect::<Vec<_>>();
+            vec![argument];
 
 
-        // ----------------------------------------------------
-        // Compile body
-        // ----------------------------------------------------
-
-        let result =
-            self.compile_expr(
+        let value =
+            self.lower_expr(
                 &builder,
-                &closure.body,
-                &closure.arguments,
                 &arguments,
+                &closure.arguments,
+                &closure.body,
             )?;
 
 
-        // ----------------------------------------------------
-        // Return
-        // ----------------------------------------------------
-
-        builder
-            .build_return(Some(&result))
-            .map_err(|e| e.to_string())?;
-
-
-        // ----------------------------------------------------
-        // Verify
-        // ----------------------------------------------------
-
-        module
-            .verify()
-            .map_err(|e| e.to_string())?;
-
-
-        // ----------------------------------------------------
-        // Show generated LLVM
-        // ----------------------------------------------------
-
-        module.print_to_stderr();
-
-
-        // ----------------------------------------------------
-        // JIT
-        // ----------------------------------------------------
-
-        let engine =
-            module
-                .create_jit_execution_engine(
-                    OptimizationLevel::Default,
-                )
-                .map_err(|e| e.to_string())?;
-
-
-        Ok(
-            CompiledClosure {
-                engine,
-                function_name: "closure".to_string(),
-            }
-        )
-    }
-
-
-    // ========================================================
-    // Expression lowering
-    // ========================================================
-
-    fn compile_expr(
-        &self,
-
-        builder: &Builder<'ctx>,
-
-        expr: &Expr,
-
-        argument_types: &[TypeInfo],
-
-        arguments: &[BasicValueEnum<'ctx>],
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        match expr {
-            Expr::Argument(index) => {
-                let argument =
-                    arguments
-                        .get(*index)
-                        .ok_or_else(|| {
-                            format!(
-                                "invalid argument index {}",
-                                index
-                            )
-                        })?;
-
-                match argument {
-                    BasicValueEnum::PointerValue(pointer) => {
-                        let ty =
-                            argument_types
-                                .get(*index)
-                                .ok_or_else(|| {
-                                    format!(
-                                        "missing type for argument {}",
-                                        index
-                                    )
-                                })?;
-
-                        let llvm_type =
-                            ty.llvm_type(self.context);
-
-                        builder
-                            .build_load(
-                                llvm_type,
-                                *pointer,
-                                &format!("arg_{}", index),
-                            )
-                            .map_err(|e| e.to_string())
-                    }
-
-                    _ => Ok(*argument),
-                }
-            }
-
-
-            Expr::Constant(value) => {
-                self.compile_constant(value)
-            }
-
-
-            Expr::Field { object, name } => {
-                self.compile_field(
-                    builder,
-                    object,
-                    name,
-                    argument_types,
-                    arguments,
-                )
-            }
-
-
-            Expr::Add { lhs, rhs } => {
-                self.compile_binary(
-                    builder,
-                    lhs,
-                    rhs,
-                    argument_types,
-                    arguments,
-                    BinaryOp::Add,
-                )
-            }
-
-
-            Expr::Sub { lhs, rhs } => {
-                self.compile_binary(
-                    builder,
-                    lhs,
-                    rhs,
-                    argument_types,
-                    arguments,
-                    BinaryOp::Sub,
-                )
-            }
-
-
-            Expr::Mul { lhs, rhs } => {
-                self.compile_binary(
-                    builder,
-                    lhs,
-                    rhs,
-                    argument_types,
-                    arguments,
-                    BinaryOp::Mul,
-                )
-            }
-
-
-            Expr::Div { lhs, rhs } => {
-                self.compile_binary(
-                    builder,
-                    lhs,
-                    rhs,
-                    argument_types,
-                    arguments,
-                    BinaryOp::Div,
-                )
-            }
-
-
-            Expr::Neg { value } => {
-                let value =
-                    self.compile_expr(
-                        builder,
-                        value,
-                        argument_types,
-                        arguments,
-                    )?;
-
-                match value {
-                    BasicValueEnum::IntValue(value) => {
-                        builder
-                            .build_int_neg(
-                                value,
-                                "neg",
-                            )
-                            .map(|v| v.into())
-                            .map_err(|e| e.to_string())
-                    }
-
-                    BasicValueEnum::FloatValue(value) => {
-                        builder
-                            .build_float_neg(
-                                value,
-                                "neg",
-                            )
-                            .map(|v| v.into())
-                            .map_err(|e| e.to_string())
-                    }
-
-                    _ => Err(
-                        "negation requires a numeric value"
-                            .to_string()
-                    ),
-                }
-            }
-        }
-    }
-
-
-    // ========================================================
-    // Constants
-    // ========================================================
-
-    fn compile_constant(
-        &self,
-        value: &Value,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        match value {
-            Value::I32(value) => {
-                Ok(
-                    self.context
-                        .i32_type()
-                        .const_int(
-                            *value as u64,
-                            true,
-                        )
-                        .into()
-                )
-            }
-
-            Value::I64(value) => {
-                Ok(
-                    self.context
-                        .i64_type()
-                        .const_int(
-                            *value as u64,
-                            true,
-                        )
-                        .into()
-                )
-            }
-
-            Value::F32(value) => {
-                Ok(
-                    self.context
-                        .f32_type()
-                        .const_float(
-                            *value as f64,
-                        )
-                        .into()
-                )
-            }
-
-            Value::F64(value) => {
-                Ok(
-                    self.context
-                        .f64_type()
-                        .const_float(*value)
-                        .into()
-                )
-            }
-
-            Value::Bool(value) => {
-                Ok(
-                    self.context
-                        .bool_type()
-                        .const_int(
-                            if *value { 1 } else { 0 },
-                            false,
-                        )
-                        .into()
-                )
-            }
-        }
-    }
-
-
-    // ========================================================
-    // Field access
-    // ========================================================
-
-    fn compile_field(
-        &self,
-
-        builder: &Builder<'ctx>,
-
-        object: &Expr,
-
-        field_name: &str,
-
-        argument_types: &[TypeInfo],
-
-        arguments: &[BasicValueEnum<'ctx>],
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        let (
-            pointer,
-            object_type,
-        ) =
-            self.compile_lvalue(
-                builder,
-                object,
-                argument_types,
-                arguments,
+        let value =
+            self.materialize_value(
+                &builder,
+                value,
             )?;
 
 
-        let TypeInfo::Struct {
-            fields,
-            ..
-        } =
-            &object_type
-        else {
-            return Err(
-                format!(
-                    "cannot access field `{}` on non-struct",
-                    field_name
-                )
-            );
-        };
-
-
-        let (
-            index,
-            field_type,
-        ) =
-            fields
-                .iter()
-                .enumerate()
-                .find_map(|(index, field)| {
-                    if field.name == field_name {
-                        Some((index, field.ty()))
-                    } else {
-                        None
-                    }
-                })
-                .ok_or_else(|| {
-                    format!(
-                        "field `{}` not found",
-                        field_name
-                    )
-                })?;
-
-
-        let struct_type =
-            object_type
-                .llvm_type(self.context)
-                .into_struct_type();
-
-
-        let field_pointer =
-            builder
-                .build_struct_gep(
-                    struct_type,
-                    pointer,
-                    index as u32,
-                    field_name,
-                )
-                .map_err(|e| e.to_string())?;
-
-
         builder
-            .build_load(
-                field_type.llvm_type(self.context),
-                field_pointer,
-                field_name,
+            .build_return(
+                Some(&value),
             )
-            .map_err(|e| e.to_string())
+            .map_err(|error| {
+                format!(
+                    "failed to build return: {:?}",
+                    error,
+                )
+            })?;
+
+
+        if function.verify(true) {
+            Ok(())
+        } else {
+            Err(
+                "LLVM function verification failed"
+                    .to_string(),
+            )
+        }
     }
 
 
-    // ========================================================
-    // L-value
-    // ========================================================
+    // --------------------------------------------------------
+    // Lower expression
+    // --------------------------------------------------------
 
-    fn compile_lvalue(
+    fn lower_expr(
         &self,
-
         builder: &Builder<'ctx>,
-
-        expr: &Expr,
-
+        arguments: &[PointerValue<'ctx>],
         argument_types: &[TypeInfo],
-
-        arguments: &[BasicValueEnum<'ctx>],
+        expr: &Expr,
     ) -> Result<
-        (PointerValue<'ctx>, TypeInfo),
+        LoweredValue<'ctx>,
         String,
     > {
         match expr {
+
+            // ------------------------------------------------
+            // Argument
+            // ------------------------------------------------
+
             Expr::Argument(index) => {
-                let argument =
-                    arguments
+                let pointer =
+                    *arguments
                         .get(*index)
                         .ok_or_else(|| {
                             format!(
-                                "invalid argument index {}",
-                                index
+                                "argument index {} out of bounds",
+                                index,
                             )
                         })?;
-
-
-                let pointer =
-                    match argument {
-                        BasicValueEnum::PointerValue(pointer) => {
-                            *pointer
-                        }
-
-                        _ => {
-                            return Err(
-                                format!(
-                                    "argument {} is not a pointer",
-                                    index
-                                )
-                            )
-                        }
-                    };
 
 
                 let type_info =
@@ -870,74 +544,177 @@ impl<'ctx> Compiler<'ctx> {
                         .get(*index)
                         .ok_or_else(|| {
                             format!(
-                                "missing argument type {}",
-                                index
+                                "argument type index {} out of bounds",
+                                index,
                             )
                         })?
                         .clone();
 
 
-                Ok((pointer, type_info))
+                Ok(
+                    LoweredValue::Pointer {
+                        pointer,
+                        type_info,
+                    }
+                )
             }
 
+
+            // ------------------------------------------------
+            // Constant
+            // ------------------------------------------------
+
+            Expr::Constant(value) => {
+                match value {
+
+                    Value::F64(value) => {
+                        Ok(
+                            LoweredValue::Value(
+                                self.context
+                                    .f64_type()
+                                    .const_float(
+                                        *value,
+                                    )
+                                    .into(),
+                            )
+                        )
+                    }
+
+
+                    Value::I32(value) => {
+                        Ok(
+                            LoweredValue::Value(
+                                self.context
+                                    .i32_type()
+                                    .const_int(
+                                        *value as u64,
+                                        true,
+                                    )
+                                    .into(),
+                            )
+                        )
+                    }
+
+
+                    Value::Bool(value) => {
+                        Ok(
+                            LoweredValue::Value(
+                                self.context
+                                    .bool_type()
+                                    .const_int(
+                                        if *value {
+                                            1
+                                        } else {
+                                            0
+                                        },
+                                        false,
+                                    )
+                                    .into(),
+                            )
+                        )
+                    }
+                }
+            }
+
+
+            // ------------------------------------------------
+            // Field
+            // ------------------------------------------------
 
             Expr::Field {
                 object,
                 name,
             } => {
+                let object =
+                    self.lower_expr(
+                        builder,
+                        arguments,
+                        argument_types,
+                        object,
+                    )?;
+
+
                 let (
                     object_pointer,
                     object_type,
                 ) =
-                    self.compile_lvalue(
-                        builder,
-                        object,
-                        argument_types,
-                        arguments,
-                    )?;
+                    match object {
+
+                        LoweredValue::Pointer {
+                            pointer,
+                            type_info,
+                        } => {
+                            (
+                                pointer,
+                                type_info,
+                            )
+                        }
 
 
-                let TypeInfo::Struct {
-                    fields,
-                    ..
-                } =
-                    &object_type
-                else {
-                    return Err(
-                        format!(
-                            "`{}` is not a struct",
-                            name
-                        )
-                    );
-                };
+                        LoweredValue::Value(_) => {
+                            return Err(
+                                format!(
+                                    "cannot access field `{}` on a value",
+                                    name,
+                                )
+                            );
+                        }
+                    };
+
+
+                let fields =
+                    match &object_type {
+
+                        TypeInfo::Struct {
+                            fields,
+                            ..
+                        } => fields,
+
+
+                        _ => {
+                            return Err(
+                                format!(
+                                    "cannot access field `{}` on non-struct type",
+                                    name,
+                                )
+                            );
+                        }
+                    };
 
 
                 let (
-                    index,
+                    field_index,
                     field_type,
                 ) =
                     fields
                         .iter()
                         .enumerate()
-                        .find_map(|(index, field)| {
-                            if field.name == name {
-                                Some((index, field.ty()))
-                            } else {
-                                None
+                        .find_map(
+                            |(index, field)| {
+                                if field.name == *name {
+                                    Some((
+                                        index,
+                                        field.type_info
+                                            .clone(),
+                                    ))
+                                } else {
+                                    None
+                                }
                             }
-                        })
+                        )
                         .ok_or_else(|| {
                             format!(
                                 "field `{}` not found",
-                                name
+                                name,
                             )
                         })?;
 
 
                 let struct_type =
-                    object_type
-                        .llvm_type(self.context)
-                        .into_struct_type();
+                    llvm_struct_type(
+                        self.context,
+                        &object_type,
+                    )?;
 
 
                 let field_pointer =
@@ -945,162 +722,424 @@ impl<'ctx> Compiler<'ctx> {
                         .build_struct_gep(
                             struct_type,
                             object_pointer,
-                            index as u32,
-                            name,
+                            field_index as u32,
+                            &format!(
+                                "{}_ptr",
+                                name,
+                            ),
                         )
-                        .map_err(|e| e.to_string())?;
+                        .map_err(|error| {
+                            format!(
+                                "failed to build GEP for field `{}`: {:?}",
+                                name,
+                                error,
+                            )
+                        })?;
 
 
-                Ok((
-                    field_pointer,
-                    field_type,
-                ))
+                Ok(
+                    LoweredValue::Pointer {
+                        pointer:
+                            field_pointer,
+
+                        type_info:
+                            field_type,
+                    }
+                )
             }
 
 
-            _ => Err(
-                "expression cannot be used as an lvalue"
-                    .to_string()
-            ),
+            // ------------------------------------------------
+            // Add
+            // ------------------------------------------------
+
+            Expr::Add {
+                lhs,
+                rhs,
+            } => {
+                self.lower_float_binary(
+                    builder,
+                    arguments,
+                    argument_types,
+                    lhs,
+                    rhs,
+                    BinaryOp::Add,
+                )
+            }
+
+
+            // ------------------------------------------------
+            // Sub
+            // ------------------------------------------------
+
+            Expr::Sub {
+                lhs,
+                rhs,
+            } => {
+                self.lower_float_binary(
+                    builder,
+                    arguments,
+                    argument_types,
+                    lhs,
+                    rhs,
+                    BinaryOp::Sub,
+                )
+            }
+
+
+            // ------------------------------------------------
+            // Mul
+            // ------------------------------------------------
+
+            Expr::Mul {
+                lhs,
+                rhs,
+            } => {
+                self.lower_float_binary(
+                    builder,
+                    arguments,
+                    argument_types,
+                    lhs,
+                    rhs,
+                    BinaryOp::Mul,
+                )
+            }
+
+
+            // ------------------------------------------------
+            // Div
+            // ------------------------------------------------
+
+            Expr::Div {
+                lhs,
+                rhs,
+            } => {
+                self.lower_float_binary(
+                    builder,
+                    arguments,
+                    argument_types,
+                    lhs,
+                    rhs,
+                    BinaryOp::Div,
+                )
+            }
         }
     }
 
 
-    // ========================================================
-    // Binary operations
-    // ========================================================
+    // --------------------------------------------------------
+    // Floating point binary operation
+    // --------------------------------------------------------
 
-    fn compile_binary(
+    fn lower_float_binary(
         &self,
-
         builder: &Builder<'ctx>,
-
-        lhs: &Expr,
-
-        rhs: &Expr,
-
+        arguments: &[PointerValue<'ctx>],
         argument_types: &[TypeInfo],
-
-        arguments: &[BasicValueEnum<'ctx>],
-
+        lhs: &Expr,
+        rhs: &Expr,
         operation: BinaryOp,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
+    ) -> Result<
+        LoweredValue<'ctx>,
+        String,
+    > {
         let lhs =
-            self.compile_expr(
+            self.lower_expr(
+                builder,
+                arguments,
+                argument_types,
+                lhs,
+            )?;
+
+
+        let lhs =
+            self.materialize_value(
                 builder,
                 lhs,
-                argument_types,
-                arguments,
             )?;
 
 
         let rhs =
-            self.compile_expr(
+            self.lower_expr(
                 builder,
-                rhs,
-                argument_types,
                 arguments,
+                argument_types,
+                rhs,
             )?;
 
 
-        match (lhs, rhs) {
-            (
-                BasicValueEnum::IntValue(lhs),
-                BasicValueEnum::IntValue(rhs),
-            ) => {
-                let value =
-                    match operation {
-                        BinaryOp::Add =>
-                            builder.build_int_add(
-                                lhs,
-                                rhs,
-                                "add",
-                            ),
+        let rhs =
+            self.materialize_value(
+                builder,
+                rhs,
+            )?;
 
-                        BinaryOp::Sub =>
-                            builder.build_int_sub(
-                                lhs,
-                                rhs,
-                                "sub",
-                            ),
 
-                        BinaryOp::Mul =>
-                            builder.build_int_mul(
-                                lhs,
-                                rhs,
-                                "mul",
-                            ),
+        let lhs =
+            lhs.into_float_value();
 
-                        BinaryOp::Div =>
-                            builder.build_int_signed_div(
-                                lhs,
-                                rhs,
-                                "div",
-                            ),
-                    }
-                    .map_err(|e| e.to_string())?;
 
-                Ok(value.into())
+        let rhs =
+            rhs.into_float_value();
+
+
+        let result =
+            match operation {
+
+                BinaryOp::Add => {
+                    builder
+                        .build_float_add(
+                            lhs,
+                            rhs,
+                            "add",
+                        )
+                        .map_err(|error| {
+                            format!(
+                                "failed to build fadd: {:?}",
+                                error,
+                            )
+                        })?
+                }
+
+
+                BinaryOp::Sub => {
+                    builder
+                        .build_float_sub(
+                            lhs,
+                            rhs,
+                            "sub",
+                        )
+                        .map_err(|error| {
+                            format!(
+                                "failed to build fsub: {:?}",
+                                error,
+                            )
+                        })?
+                }
+
+
+                BinaryOp::Mul => {
+                    builder
+                        .build_float_mul(
+                            lhs,
+                            rhs,
+                            "mul",
+                        )
+                        .map_err(|error| {
+                            format!(
+                                "failed to build fmul: {:?}",
+                                error,
+                            )
+                        })?
+                }
+
+
+                BinaryOp::Div => {
+                    builder
+                        .build_float_div(
+                            lhs,
+                            rhs,
+                            "div",
+                        )
+                        .map_err(|error| {
+                            format!(
+                                "failed to build fdiv: {:?}",
+                                error,
+                            )
+                        })?
+                }
+            };
+
+
+        Ok(
+            LoweredValue::Value(
+                result.into(),
+            )
+        )
+    }
+
+
+    // --------------------------------------------------------
+    // Materialize pointer -> value
+    // --------------------------------------------------------
+
+    fn materialize_value(
+        &self,
+        builder: &Builder<'ctx>,
+        value: LoweredValue<'ctx>,
+    ) -> Result<
+        BasicValueEnum<'ctx>,
+        String,
+    > {
+        match value {
+
+            LoweredValue::Value(value) => {
+                Ok(value)
             }
 
 
-            (
-                BasicValueEnum::FloatValue(lhs),
-                BasicValueEnum::FloatValue(rhs),
-            ) => {
-                let value =
-                    match operation {
-                        BinaryOp::Add =>
-                            builder.build_float_add(
-                                lhs,
-                                rhs,
-                                "add",
-                            ),
+            LoweredValue::Pointer {
+                pointer,
+                type_info,
+            } => {
+                let llvm_type =
+                    llvm_type(
+                        self.context,
+                        &type_info,
+                    )?;
 
-                        BinaryOp::Sub =>
-                            builder.build_float_sub(
-                                lhs,
-                                rhs,
-                                "sub",
-                            ),
 
-                        BinaryOp::Mul =>
-                            builder.build_float_mul(
-                                lhs,
-                                rhs,
-                                "mul",
-                            ),
-
-                        BinaryOp::Div =>
-                            builder.build_float_div(
-                                lhs,
-                                rhs,
-                                "div",
-                            ),
-                    }
-                    .map_err(|e| e.to_string())?;
-
-                Ok(value.into())
+                builder
+                    .build_load(
+                        llvm_type,
+                        pointer,
+                        "load",
+                    )
+                    .map_err(|error| {
+                        format!(
+                            "failed to build load: {:?}",
+                            error,
+                        )
+                    })
             }
-
-
-            _ => Err(
-                "binary operands must have the same numeric type"
-                    .to_string()
-            ),
         }
     }
 }
 
 
 // ============================================================
-// Binary operation
+// Lowered value
 // ============================================================
 
-#[derive(Debug, Clone, Copy)]
+enum LoweredValue<'ctx> {
+    Value(
+        BasicValueEnum<'ctx>
+    ),
+
+    Pointer {
+        pointer:
+            PointerValue<'ctx>,
+
+        type_info:
+            TypeInfo,
+    },
+}
+
+
+// ============================================================
+// Binary operations
+// ============================================================
+
 enum BinaryOp {
     Add,
     Sub,
     Mul,
     Div,
+}
+
+
+// ============================================================
+// TypeInfo -> LLVM type
+// ============================================================
+
+fn llvm_type<'ctx>(
+    context: &'ctx Context,
+    type_info: &TypeInfo,
+) -> Result<
+    BasicTypeEnum<'ctx>,
+    String,
+> {
+    match type_info {
+
+        TypeInfo::F64 => {
+            Ok(
+                context
+                    .f64_type()
+                    .into()
+            )
+        }
+
+
+        TypeInfo::I32 => {
+            Ok(
+                context
+                    .i32_type()
+                    .into()
+            )
+        }
+
+
+        TypeInfo::Bool => {
+            Ok(
+                context
+                    .bool_type()
+                    .into()
+            )
+        }
+
+
+        TypeInfo::Struct {
+            fields,
+            ..
+        } => {
+            let field_types =
+                fields
+                    .iter()
+                    .map(|field| {
+                        llvm_type(
+                            context,
+                            &field.type_info,
+                        )
+                    })
+                    .collect::<
+                        Result<
+                            Vec<_>,
+                            _,
+                        >
+                    >()?;
+
+
+            Ok(
+                context
+                    .struct_type(
+                        &field_types,
+                        false,
+                    )
+                    .into()
+            )
+        }
+    }
+}
+
+
+// ============================================================
+// TypeInfo -> StructType
+// ============================================================
+
+fn llvm_struct_type<'ctx>(
+    context: &'ctx Context,
+    type_info: &TypeInfo,
+) -> Result<
+    StructType<'ctx>,
+    String,
+> {
+    match llvm_type(
+        context,
+        type_info,
+    )? {
+
+        BasicTypeEnum::StructType(
+            struct_type
+        ) => {
+            Ok(struct_type)
+        }
+
+
+        _ => {
+            Err(
+                "expected struct LLVM type"
+                    .to_string()
+            )
+        }
+    }
 }

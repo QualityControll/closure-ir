@@ -2,131 +2,383 @@ use proc_macro::TokenStream;
 
 use quote::quote;
 
-use std::collections::HashMap;
-
 use syn::{
     parse_macro_input,
-    BinOp,
-    Data,
-    DeriveInput,
     Expr,
     ExprBinary,
+    ExprBlock,
     ExprClosure,
     ExprField,
-    ExprGroup,
     ExprLit,
-    ExprParen,
     ExprPath,
     Fields,
+    ItemStruct,
     Lit,
-    ReturnType,
+    Member,
+    Pat,
+    PatIdent,
+    Type,
 };
 
 
-#[proc_macro_derive(CompileType)]
-pub fn derive_compile_type(
-    input: TokenStream,
-) -> TokenStream {
-    let input =
-        parse_macro_input!(input as DeriveInput);
+// ============================================================
+// Type -> TypeInfo expression
+// ============================================================
 
-    let name =
-        &input.ident;
+fn compile_type_expr(
+    ty: &Type,
+) -> proc_macro2::TokenStream {
+    match ty {
+        Type::Path(path) => {
+            let ident = path
+                .path
+                .segments
+                .last()
+                .unwrap()
+                .ident
+                .clone();
 
-    let fields =
-        match &input.data {
-            Data::Struct(data) => {
-                &data.fields
-            }
-
-            _ => {
-                return syn::Error::new_spanned(
-                    name,
-                    "CompileType can only be derived for structs",
-                )
-                .to_compile_error()
-                .into();
-            }
-        };
-
-    let Fields::Named(fields) =
-        fields
-    else {
-        return syn::Error::new_spanned(
-            fields,
-            "CompileType requires named fields",
-        )
-        .to_compile_error()
-        .into();
-    };
-
-    let field_info =
-        fields.named.iter().map(|field| {
-            let field_name =
-                field.ident.as_ref().unwrap();
-
-            let field_type =
-                &field.ty;
-
-            quote! {
-                ::closure_llvm::FieldInfo {
-                    name: stringify!(#field_name),
-
-                    type_info:
-                        <#field_type as
-                            ::closure_llvm::CompileType>
-                            ::type_info,
+            if ident == "f64" {
+                quote! {
+                    ::closure_llvm::TypeInfo::F64
+                }
+            } else if ident == "f32" {
+                quote! {
+                    ::closure_llvm::TypeInfo::F32
+                }
+            } else if ident == "i64" {
+                quote! {
+                    ::closure_llvm::TypeInfo::I64
+                }
+            } else if ident == "i32" {
+                quote! {
+                    ::closure_llvm::TypeInfo::I32
+                }
+            } else if ident == "i16" {
+                quote! {
+                    ::closure_llvm::TypeInfo::I16
+                }
+            } else if ident == "i8" {
+                quote! {
+                    ::closure_llvm::TypeInfo::I8
+                }
+            } else if ident == "u64" {
+                quote! {
+                    ::closure_llvm::TypeInfo::U64
+                }
+            } else if ident == "u32" {
+                quote! {
+                    ::closure_llvm::TypeInfo::U32
+                }
+            } else if ident == "u16" {
+                quote! {
+                    ::closure_llvm::TypeInfo::U16
+                }
+            } else if ident == "u8" {
+                quote! {
+                    ::closure_llvm::TypeInfo::U8
+                }
+            } else if ident == "bool" {
+                quote! {
+                    ::closure_llvm::TypeInfo::Bool
+                }
+            } else {
+                quote! {
+                    <#ty as ::closure_llvm::CompileType>::type_info()
                 }
             }
-        });
+        }
 
-    let llvm_fields =
-        fields.named.iter().map(|field| {
-            let field_type =
-                &field.ty;
-
+        _ => {
             quote! {
-                <#field_type as
-                    ::closure_llvm::CompileType>
-                    ::llvm_type(context)
-            }
-        });
-
-    quote! {
-        impl ::closure_llvm::CompileType
-            for #name
-        {
-            fn type_info()
-                -> ::closure_llvm::TypeInfo
-            {
-                ::closure_llvm::TypeInfo::Struct {
-                    name: stringify!(#name),
-
-                    fields: &[
-                        #(#field_info),*
-                    ],
-                }
-            }
-
-            fn llvm_type<'ctx>(
-                context:
-                    &'ctx
-                    ::inkwell::context::Context,
-            )
-                -> ::inkwell::types::BasicTypeEnum<'ctx>
-            {
-                context
-                    .struct_type(
-                        &[
-                            #(#llvm_fields),*
-                        ],
-                        false,
-                    )
-                    .into()
+                <#ty as ::closure_llvm::CompileType>::type_info()
             }
         }
     }
-    .into()
+}
+
+
+// ============================================================
+// Expression -> compiler IR
+// ============================================================
+
+fn expr_to_ir(
+    expr: &Expr,
+    argument: &syn::Ident,
+) -> proc_macro2::TokenStream {
+    match expr {
+
+        // ----------------------------------------------------
+        // Parenthesized expression
+        // ----------------------------------------------------
+
+        Expr::Paren(paren) => {
+            expr_to_ir(
+                &paren.expr,
+                argument,
+            )
+        }
+
+
+        // ----------------------------------------------------
+        // Block expression
+        // ----------------------------------------------------
+
+        Expr::Block(
+            ExprBlock {
+                block,
+                ..
+            },
+        ) => {
+            if block.stmts.len() != 1 {
+                panic!(
+                    "closure body must contain exactly one expression"
+                );
+            }
+
+            match &block.stmts[0] {
+                syn::Stmt::Expr(
+                    expr,
+                    _,
+                ) => {
+                    expr_to_ir(
+                        expr,
+                        argument,
+                    )
+                }
+
+                _ => {
+                    panic!(
+                        "closure body must contain exactly one expression"
+                    );
+                }
+            }
+        }
+
+
+        // ----------------------------------------------------
+        // Binary expression
+        // ----------------------------------------------------
+
+        Expr::Binary(
+            ExprBinary {
+                left,
+                op,
+                right,
+                ..
+            },
+        ) => {
+            let lhs =
+                expr_to_ir(
+                    left,
+                    argument,
+                );
+
+            let rhs =
+                expr_to_ir(
+                    right,
+                    argument,
+                );
+
+            if matches!(
+                op,
+                syn::BinOp::Sub(_)
+            ) {
+                quote! {
+                    ::closure_llvm::Expr::Sub {
+                        lhs: Box::new(#lhs),
+                        rhs: Box::new(#rhs),
+                    }
+                }
+            } else if matches!(
+                op,
+                syn::BinOp::Add(_)
+            ) {
+                quote! {
+                    ::closure_llvm::Expr::Add {
+                        lhs: Box::new(#lhs),
+                        rhs: Box::new(#rhs),
+                    }
+                }
+            } else if matches!(
+                op,
+                syn::BinOp::Mul(_)
+            ) {
+                quote! {
+                    ::closure_llvm::Expr::Mul {
+                        lhs: Box::new(#lhs),
+                        rhs: Box::new(#rhs),
+                    }
+                }
+            } else if matches!(
+                op,
+                syn::BinOp::Div(_)
+            ) {
+                quote! {
+                    ::closure_llvm::Expr::Div {
+                        lhs: Box::new(#lhs),
+                        rhs: Box::new(#rhs),
+                    }
+                }
+            } else {
+                panic!(
+                    "unsupported binary operator"
+                );
+            }
+        }
+
+
+        // ----------------------------------------------------
+        // Field access
+        // ----------------------------------------------------
+
+        Expr::Field(
+            ExprField {
+                base,
+                member,
+                ..
+            },
+        ) => {
+            let base_ir =
+                expr_to_ir(
+                    base,
+                    argument,
+                );
+
+            let field_name =
+                match member {
+                    Member::Named(name) => {
+                        name.to_string()
+                    }
+
+                    Member::Unnamed(index) => {
+                        index.index.to_string()
+                    }
+                };
+
+            quote! {
+                ::closure_llvm::Expr::Field {
+                    object: Box::new(#base_ir),
+                    name: #field_name.to_string(),
+                }
+            }
+        }
+
+
+        // ----------------------------------------------------
+        // Identifier / path
+        // ----------------------------------------------------
+
+        Expr::Path(
+            ExprPath {
+                path,
+                ..
+            },
+        ) => {
+            let ident =
+                path.segments
+                    .last()
+                    .unwrap()
+                    .ident
+                    .clone();
+
+            if ident == *argument {
+                quote! {
+                    ::closure_llvm::Expr::Argument(0)
+                }
+            } else {
+                panic!(
+                    "unsupported identifier: {}",
+                    ident
+                );
+            }
+        }
+
+
+        // ----------------------------------------------------
+        // f64 literal
+        // ----------------------------------------------------
+
+        Expr::Lit(
+            ExprLit {
+                lit: Lit::Float(value),
+                ..
+            },
+        ) => {
+            let value =
+                value
+                    .base10_parse::<f64>()
+                    .unwrap();
+
+            quote! {
+                ::closure_llvm::Expr::Constant(
+                    ::closure_llvm::Value::F64(
+                        #value
+                    )
+                )
+            }
+        }
+
+
+        // ----------------------------------------------------
+        // Integer literal
+        // ----------------------------------------------------
+
+        Expr::Lit(
+            ExprLit {
+                lit: Lit::Int(value),
+                ..
+            },
+        ) => {
+            let value =
+                value
+                    .base10_parse::<i32>()
+                    .unwrap();
+
+            quote! {
+                ::closure_llvm::Expr::Constant(
+                    ::closure_llvm::Value::I32(
+                        #value
+                    )
+                )
+            }
+        }
+
+
+        // ----------------------------------------------------
+        // Boolean literal
+        // ----------------------------------------------------
+
+        Expr::Lit(
+            ExprLit {
+                lit: Lit::Bool(value),
+                ..
+            },
+        ) => {
+            let value =
+                value.value;
+
+            quote! {
+                ::closure_llvm::Expr::Constant(
+                    ::closure_llvm::Value::Bool(
+                        #value
+                    )
+                )
+            }
+        }
+
+
+        // ----------------------------------------------------
+        // Unsupported expression
+        // ----------------------------------------------------
+
+        other => {
+            panic!(
+                "unsupported expression: {}",
+                quote!(#other)
+            );
+        }
+    }
 }
 
 
@@ -143,410 +395,401 @@ pub fn compile_closure(
             input as ExprClosure
         );
 
-    match compile_closure_impl(&closure) {
-        Ok(tokens) =>
-            tokens.into(),
 
-        Err(error) =>
-            error
-                .to_compile_error()
-                .into(),
-    }
-}
+    // --------------------------------------------------------
+    // Extract exactly one argument
+    // --------------------------------------------------------
 
+    let mut inputs =
+        closure.inputs.iter();
 
-// ============================================================
-// Closure compiler
-// ============================================================
-
-fn compile_closure_impl(
-    closure: &ExprClosure,
-) -> syn::Result<
-    proc_macro2::TokenStream
-> {
-    let mut arguments =
-        Vec::new();
-
-    let mut environment =
-        HashMap::new();
-
-    for (index, input)
-        in closure.inputs.iter().enumerate()
-    {
-        let syn::Pat::Type(pat_type) =
-            input
-        else {
-            return Err(
-                syn::Error::new_spanned(
-                    input,
-                    "closure arguments must have explicit types",
+    let first_input =
+        inputs
+            .next()
+            .unwrap_or_else(|| {
+                panic!(
+                    "closure must have exactly one argument"
                 )
-            );
-        };
+            });
 
-        let syn::Pat::Ident(pattern) =
-            &*pat_type.pat
-        else {
-            return Err(
-                syn::Error::new_spanned(
-                    &pat_type.pat,
-                    "closure arguments must be identifiers",
-                )
-            );
-        };
-
-        environment.insert(
-            pattern.ident.to_string(),
-            index,
+    if inputs.next().is_some() {
+        panic!(
+            "closure must have exactly one argument"
         );
+    }
 
-        let ty =
-            &pat_type.ty;
 
-        arguments.push(
-            quote! {
-                <#ty as
-                    ::closure_llvm::CompileType>
-                    ::type_info()
+    // --------------------------------------------------------
+    // Argument type
+    // --------------------------------------------------------
+
+    let argument_type =
+        match first_input {
+            Pat::Type(pat_type) => {
+                (*pat_type.ty).clone()
             }
-        );
-    }
+
+            _ => {
+                panic!(
+                    "closure argument must be explicitly typed"
+                );
+            }
+        };
+
+
+    // --------------------------------------------------------
+    // Argument identifier
+    // --------------------------------------------------------
+
+    let argument_ident =
+        match first_input {
+            Pat::Type(pat_type) => {
+                match &*pat_type.pat {
+                    Pat::Ident(
+                        PatIdent {
+                            ident,
+                            ..
+                        },
+                    ) => {
+                        ident.clone()
+                    }
+
+                    _ => {
+                        panic!(
+                            "closure argument must be an identifier"
+                        );
+                    }
+                }
+            }
+
+            _ => {
+                unreachable!();
+            }
+        };
+
+
+    // --------------------------------------------------------
+    // Return type
+    // --------------------------------------------------------
 
     let return_type =
         match &closure.output {
-            ReturnType::Type(_, ty) => {
-                quote! {
-                    <#ty as
-                        ::closure_llvm::CompileType>
-                        ::type_info()
-                }
+            syn::ReturnType::Type(
+                _,
+                ty,
+            ) => {
+                (**ty).clone()
             }
 
-            ReturnType::Default => {
-                return Err(
-                    syn::Error::new_spanned(
-                        &closure.output,
-                        "closure must have an explicit return type",
-                    )
+            syn::ReturnType::Default => {
+                panic!(
+                    "closure must specify a return type"
                 );
             }
         };
 
+
+    // --------------------------------------------------------
+    // Type information
+    // --------------------------------------------------------
+
+    let argument_info =
+        compile_type_expr(
+            &argument_type,
+        );
+
+    let return_info =
+        compile_type_expr(
+            &return_type,
+        );
+
+
+    // --------------------------------------------------------
+    // Convert closure body to compiler IR
+    // --------------------------------------------------------
+
     let body =
-        compile_expr(
+        expr_to_ir(
             &closure.body,
-            &environment,
-        )?;
+            &argument_ident,
+        );
 
-    Ok(
+
+    // --------------------------------------------------------
+    // Generate compiled closure
+    // --------------------------------------------------------
+    //
+    // IMPORTANT:
+    //
+    // CompiledClosure contains an ExecutionEngine<'ctx>.
+    // Therefore the LLVM Context must outlive the returned
+    // CompiledClosure.
+    //
+    // A local Context would be dropped at the end of this
+    // generated block, producing:
+    //
+    //     error[E0716]: temporary value dropped while borrowed
+    //
+    // We intentionally leak the Context so that it has a
+    // 'static lifetime.
+    //
+    // This is acceptable for the current JIT API because the
+    // compiled closure is intended to remain usable for the
+    // lifetime of the process.
+    //
+    // --------------------------------------------------------
+
+    let expanded =
         quote! {
-            ::closure_llvm::Closure {
-                arguments: vec![
-                    #(#arguments),*
-                ],
+            {
+                let context:
+                    &'static ::inkwell::context::Context =
+                    Box::leak(
+                        Box::new(
+                            ::inkwell::context::Context::create()
+                        )
+                    );
 
-                return_type: #return_type,
 
-                body: #body,
+                let compiler =
+                    ::closure_llvm::Compiler::new(
+                        context,
+                    );
+
+
+                let closure =
+                    ::closure_llvm::Closure {
+                        arguments: vec![
+                            #argument_info,
+                        ],
+
+                        return_type:
+                            #return_info,
+
+                        body:
+                            #body,
+                    };
+
+
+                compiler
+                    .compile::<
+                        #argument_type,
+                        #return_type,
+                    >(
+                        &closure,
+                    )
+                    .expect(
+                        "failed to compile closure"
+                    )
             }
-        }
-    )
+        };
+
+
+    expanded.into()
 }
 
 
 // ============================================================
-// Expression lowering
+// call!
+// ============================================================
+//
+// Usage:
+//
+//     let result = call!(
+//         compiled,
+//         rectangle
+//     );
+//
+// Expands approximately to:
+//
+//     unsafe {
+//         compiled.call(&rectangle)
+//     }
+//
 // ============================================================
 
-fn compile_expr(
-    expr: &Expr,
-    environment: &HashMap<String, usize>,
-) -> syn::Result<proc_macro2::TokenStream> {
-    eprintln!("compile_expr: {:?}", expr);
-
-    match expr {
-        // ----------------------------------------------------
-        // Block
-        // ----------------------------------------------------
-
-        Expr::Block(expr_block) => {
-            let statements = &expr_block.block.stmts;
-
-            if statements.len() != 1 {
-                return Err(
-                    syn::Error::new_spanned(
-                        &expr_block.block,
-                        "only a single expression is supported",
-                    )
-                );
-            }
-
-            match &statements[0] {
-                syn::Stmt::Expr(expr, _) => {
-                    compile_expr(
-                        expr,
-                        environment,
-                    )
-                }
-
-                statement => {
-                    Err(
-                        syn::Error::new_spanned(
-                            statement,
-                            "expected an expression",
-                        )
-                    )
-                }
-            }
-        }
+#[proc_macro]
+pub fn call(
+    input: TokenStream,
+) -> TokenStream {
+    let args =
+        syn::parse_macro_input!(
+            input
+            with syn::punctuated::Punctuated::<
+                Expr,
+                syn::Token![,]
+            >::parse_terminated
+        );
 
 
-        // ----------------------------------------------------
-        // Parentheses
-        // ----------------------------------------------------
-
-        Expr::Paren(expr_paren) => {
-            compile_expr(
-                &expr_paren.expr,
-                environment,
-            )
-        }
+    if args.len() != 2 {
+        panic!(
+            "call! expects exactly two arguments: \
+             call!(compiled, value)"
+        );
+    }
 
 
-        // ----------------------------------------------------
-        // Group
-        // ----------------------------------------------------
-
-        Expr::Group(expr_group) => {
-            compile_expr(
-                &expr_group.expr,
-                environment,
-            )
-        }
+    let mut iter =
+        args.into_iter();
 
 
-        // ----------------------------------------------------
-        // Identifier
-        // ----------------------------------------------------
+    let compiled =
+        iter.next().unwrap();
 
-        Expr::Path(expr_path) => {
-            if expr_path.path.segments.len() != 1 {
-                return Err(
-                    syn::Error::new_spanned(
-                        &expr_path.path,
-                        "only simple identifiers are supported",
-                    )
-                );
-            }
-
-            let name =
-                expr_path
-                    .path
-                    .segments
-                    .first()
-                    .unwrap()
-                    .ident
-                    .to_string();
-
-            let index =
-                environment
-                    .get(&name)
-                    .ok_or_else(|| {
-                        syn::Error::new_spanned(
-                            &expr_path.path,
-                            format!(
-                                "unknown closure argument `{}`",
-                                name
-                            ),
-                        )
-                    })?;
-
-            Ok(
-                quote! {
-                    ::closure_llvm::Expr::Argument(#index)
-                }
-            )
-        }
+    let value =
+        iter.next().unwrap();
 
 
-        // ----------------------------------------------------
-        // Field access
-        // ----------------------------------------------------
-
-        Expr::Field(expr_field) => {
-            let object =
-                compile_expr(
-                    &expr_field.base,
-                    environment,
-                )?;
-
-            let field_name =
-                match &expr_field.member {
-                    syn::Member::Named(ident) => {
-                        ident.to_string()
-                    }
-
-                    syn::Member::Unnamed(index) => {
-                        index.index.to_string()
-                    }
-                };
-
-            Ok(
-                quote! {
-                    ::closure_llvm::Expr::Field {
-                        object: Box::new(#object),
-                        name: #field_name.to_string(),
-                    }
-                }
-            )
-        }
-
-
-        // ----------------------------------------------------
-        // Binary expression
-        // ----------------------------------------------------
-
-        Expr::Binary(expr_binary) => {
-            let lhs =
-                compile_expr(
-                    &expr_binary.left,
-                    environment,
-                )?;
-
-            let rhs =
-                compile_expr(
-                    &expr_binary.right,
-                    environment,
-                )?;
-
-            match &expr_binary.op {
-                BinOp::Add(_) => {
-                    Ok(
-                        quote! {
-                            ::closure_llvm::Expr::Add {
-                                lhs: Box::new(#lhs),
-                                rhs: Box::new(#rhs),
-                            }
-                        }
-                    )
-                }
-
-                BinOp::Sub(_) => {
-                    Ok(
-                        quote! {
-                            ::closure_llvm::Expr::Sub {
-                                lhs: Box::new(#lhs),
-                                rhs: Box::new(#rhs),
-                            }
-                        }
-                    )
-                }
-
-                BinOp::Mul(_) => {
-                    Ok(
-                        quote! {
-                            ::closure_llvm::Expr::Mul {
-                                lhs: Box::new(#lhs),
-                                rhs: Box::new(#rhs),
-                            }
-                        }
-                    )
-                }
-
-                BinOp::Div(_) => {
-                    Ok(
-                        quote! {
-                            ::closure_llvm::Expr::Div {
-                                lhs: Box::new(#lhs),
-                                rhs: Box::new(#rhs),
-                            }
-                        }
-                    )
-                }
-
-                op => {
-                    Err(
-                        syn::Error::new_spanned(
-                            op,
-                            "unsupported binary operator",
-                        )
-                    )
-                }
-            }
-        }
-
-
-        // ----------------------------------------------------
-        // Literals
-        // ----------------------------------------------------
-
-        Expr::Lit(expr_lit) => {
-            match &expr_lit.lit {
-                Lit::Int(value) => {
-                    let value =
-                        value.base10_parse::<i32>()?;
-
-                    Ok(
-                        quote! {
-                            ::closure_llvm::Expr::Constant(
-                                ::closure_llvm::Value::I32(#value)
-                            )
-                        }
-                    )
-                }
-
-                Lit::Float(value) => {
-                    let value =
-                        value.base10_parse::<f64>()?;
-
-                    Ok(
-                        quote! {
-                            ::closure_llvm::Expr::Constant(
-                                ::closure_llvm::Value::F64(#value)
-                            )
-                        }
-                    )
-                }
-
-                Lit::Bool(value) => {
-                    let value =
-                        value.value;
-
-                    Ok(
-                        quote! {
-                            ::closure_llvm::Expr::Constant(
-                                ::closure_llvm::Value::Bool(#value)
-                            )
-                        }
-                    )
-                }
-
-                lit => {
-                    Err(
-                        syn::Error::new_spanned(
-                            lit,
-                            "unsupported literal",
-                        )
-                    )
-                }
-            }
-        }
-
-
-        // ----------------------------------------------------
-        // Everything else
-        // ----------------------------------------------------
-
-        other => {
-            Err(
-                syn::Error::new_spanned(
-                    other,
-                    format!(
-                        "unsupported expression: {:?}",
-                        other
-                    ),
-                )
+    quote! {
+        unsafe {
+            (#compiled).call(
+                &(#value)
             )
         }
     }
+    .into()
+}
+
+
+// ============================================================
+// #[derive(CompileType)]
+// ============================================================
+
+#[proc_macro_derive(CompileType)]
+pub fn derive_compile_type(
+    input: TokenStream,
+) -> TokenStream {
+    let item =
+        parse_macro_input!(
+            input as ItemStruct
+        );
+
+
+    let name =
+        item.ident;
+
+
+    // --------------------------------------------------------
+    // Named fields only
+    // --------------------------------------------------------
+
+    let fields =
+        match item.fields {
+            Fields::Named(fields) => {
+                fields.named
+            }
+
+            _ => {
+                panic!(
+                    "CompileType requires a struct with named fields"
+                );
+            }
+        };
+
+
+    // --------------------------------------------------------
+    // Generate TypeInfo fields
+    // --------------------------------------------------------
+
+    let field_entries =
+        fields
+            .iter()
+            .map(|field| {
+                let field_name =
+                    field
+                        .ident
+                        .as_ref()
+                        .unwrap();
+
+                let field_type =
+                    &field.ty;
+
+                let type_info =
+                    compile_type_expr(
+                        field_type,
+                    );
+
+                quote! {
+                    ::closure_llvm::FieldInfo {
+                        name:
+                            stringify!(
+                                #field_name
+                            )
+                            .to_string(),
+
+                        type_info:
+                            #type_info,
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+
+
+    // --------------------------------------------------------
+    // Generate LLVM field types
+    // --------------------------------------------------------
+
+    let field_types =
+        fields
+            .iter()
+            .map(|field| {
+                let ty =
+                    &field.ty;
+
+                quote! {
+                    <#ty as ::closure_llvm::CompileType>
+                        ::llvm_type(context)
+                }
+            })
+            .collect::<Vec<_>>();
+
+
+    // --------------------------------------------------------
+    // Generate CompileType implementation
+    // --------------------------------------------------------
+
+    let expanded =
+        quote! {
+            impl ::closure_llvm::CompileType
+                for #name
+            {
+                fn type_info()
+                    -> ::closure_llvm::TypeInfo
+                {
+                    ::closure_llvm::TypeInfo::Struct {
+                        name:
+                            stringify!(
+                                #name
+                            )
+                            .to_string(),
+
+                        fields:
+                            vec![
+                                #(#field_entries),*
+                            ],
+                    }
+                }
+
+
+                fn llvm_type<'ctx>(
+                    context:
+                        &'ctx ::inkwell::context::Context,
+                )
+                    -> ::inkwell::types::BasicTypeEnum<'ctx>
+                {
+                    context
+                        .struct_type(
+                            &[
+                                #(#field_types),*
+                            ],
+                            false,
+                        )
+                        .into()
+                }
+            }
+        };
+
+
+    expanded.into()
 }

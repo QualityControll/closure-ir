@@ -1,17 +1,21 @@
 use closure_llvm::{
+    call,
     compile_closure,
     CompileType,
-    Compiler,
 };
-
-use inkwell::context::Context;
 
 
 // ============================================================
 // Point
 // ============================================================
 
-#[derive(Debug, Clone, Copy, CompileType)]
+#[repr(C)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    CompileType,
+)]
 struct Point {
     x: f64,
     y: f64,
@@ -22,7 +26,13 @@ struct Point {
 // Rectangle
 // ============================================================
 
-#[derive(Debug, Clone, Copy, CompileType)]
+#[repr(C)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    CompileType,
+)]
 struct Rectangle {
     top_left: Point,
     bottom_right: Point,
@@ -34,18 +44,6 @@ struct Rectangle {
 // ============================================================
 
 fn main() {
-    // --------------------------------------------------------
-    // Create LLVM context
-    // --------------------------------------------------------
-
-    let context =
-        Context::create();
-
-
-    // --------------------------------------------------------
-    // Build our Rust-side Rectangle
-    // --------------------------------------------------------
-
     let rectangle =
         Rectangle {
             top_left: Point {
@@ -54,8 +52,8 @@ fn main() {
             },
 
             bottom_right: Point {
-                x: 110.0,
-                y: 70.0,
+                x: 50.0,
+                y: 80.0,
             },
         };
 
@@ -67,76 +65,54 @@ fn main() {
 
 
     // --------------------------------------------------------
-    // Generate the closure IR
+    // Compile the closure to LLVM
     //
-    // This closure:
+    // compile_closure! does all of the following:
     //
-    //     |r: Rectangle| -> f64 {
-    //         r.bottom_right.x - r.top_left.x
-    //     }
+    //   1. Creates the LLVM context
+    //   2. Builds the Closure description
+    //   3. Lowers the Rust expression
+    //   4. Generates LLVM IR
+    //   5. JIT compiles the function
+    //   6. Returns CompiledClosure<Rectangle, f64>
     //
-    // should ultimately become approximately:
-    //
-    //     double @closure(%Rectangle* %r)
-    //
-    // and perform:
-    //
-    //     r.bottom_right.x - r.top_left.x
+    // There is NO additional .compile() call.
     // --------------------------------------------------------
 
-    let closure =
+    let compiled =
         compile_closure!(
             |r: Rectangle| -> f64 {
-                r.bottom_right.x - r.top_left.x
+                r.bottom_right.x
+                    - r.top_left.x
             }
         );
 
 
     // --------------------------------------------------------
-    // Compile to LLVM/JIT
+    // Call the JIT compiled function
     // --------------------------------------------------------
 
-    let compiler =
-        Compiler::new(
-            &context
+    let result =
+        call!(
+            compiled,
+            rectangle
         );
 
 
-    let compiled =
-        compiler
-            .compile(&closure)
-            .expect(
-                "failed to compile closure"
-            );
-
-
     println!(
-        "Closure compiled successfully."
-    );
-
-
-    println!(
-        "Function: {}",
-        compiled.function_name
+        "JIT result: {}",
+        result
     );
 
 
     // --------------------------------------------------------
-    // NOTE:
+    // Expected result:
     //
-    // The next step is obtaining a correctly typed JIT function
-    // pointer and calling it with &rectangle.
-    //
-    // For example, conceptually:
-    //
-    //     type Fn =
-    //         unsafe extern "C" fn(
-    //             *const Rectangle
-    //         ) -> f64;
-    //
-    // That part should be added once the ABI for generated
-    // structs is finalized.
+    //     50.0 - 10.0 = 40.0
     // --------------------------------------------------------
 
-    let _ = rectangle;
+    assert_eq!(
+        result,
+        40.0
+    );
 }
