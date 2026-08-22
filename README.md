@@ -39,14 +39,14 @@ rust-closure-llvm/
 
 ## Roadmap
 
- - [ ] Generalize LLVM type lowering
- - [ ] Complete struct argument lowering
- - [ ] Struct field access in LLVM
- - [ ] Floating-point expressions
- - [ ] Boolean expressions
- - [ ] Comparisons
- - [ ] Conditional expressions
- - [ ] if expressions
+ - [x] Generalize LLVM type lowering
+ - [x] Complete struct argument lowering
+ - [x] Struct field access in LLVM
+ - [x] Floating-point expressions
+ - [x] Boolean expressions
+ - [x] Comparisons
+ - [x] Conditional expressions
+ - [x] if expressions
  - [ ] Local variables
  - [ ] Multiple statements
  - [ ] Function calls
