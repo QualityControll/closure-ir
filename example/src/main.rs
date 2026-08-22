@@ -8,10 +8,10 @@ use inkwell::context::Context;
 
 
 // ============================================================
-// User-defined type
+// Point
 // ============================================================
 
-#[derive(Debug, CompileType)]
+#[derive(Debug, Clone, Copy, CompileType)]
 struct Point {
     x: f64,
     y: f64,
@@ -19,87 +19,124 @@ struct Point {
 
 
 // ============================================================
-// Nested user-defined type
+// Rectangle
 // ============================================================
 
-#[derive(Debug, CompileType)]
+#[derive(Debug, Clone, Copy, CompileType)]
 struct Rectangle {
     top_left: Point,
     bottom_right: Point,
 }
 
 
+// ============================================================
+// Main
+// ============================================================
+
 fn main() {
-
     // --------------------------------------------------------
-    // Type information
-    // --------------------------------------------------------
-
-    let point_info =
-        Point::type_info();
-
-    println!(
-        "Point type:\n{point_info:#?}"
-    );
-
-
-    let rectangle_info =
-        Rectangle::type_info();
-
-    println!(
-        "Rectangle type:\n{rectangle_info:#?}"
-    );
-
-
-    // --------------------------------------------------------
-    // Compile closure
-    // --------------------------------------------------------
-
-    let closure =
-        compile_closure!(
-            |x: i32, y: i32| -> i32 {
-                (x * 2) + y
-            }
-        );
-
-
-    println!(
-        "Closure IR:\n{closure:#?}"
-    );
-
-
-    // --------------------------------------------------------
-    // LLVM/JIT
+    // Create LLVM context
     // --------------------------------------------------------
 
     let context =
         Context::create();
 
+
+    // --------------------------------------------------------
+    // Build our Rust-side Rectangle
+    // --------------------------------------------------------
+
+    let rectangle =
+        Rectangle {
+            top_left: Point {
+                x: 10.0,
+                y: 20.0,
+            },
+
+            bottom_right: Point {
+                x: 110.0,
+                y: 70.0,
+            },
+        };
+
+
+    println!(
+        "Rectangle: {:?}",
+        rectangle
+    );
+
+
+    // --------------------------------------------------------
+    // Generate the closure IR
+    //
+    // This closure:
+    //
+    //     |r: Rectangle| -> f64 {
+    //         r.bottom_right.x - r.top_left.x
+    //     }
+    //
+    // should ultimately become approximately:
+    //
+    //     double @closure(%Rectangle* %r)
+    //
+    // and perform:
+    //
+    //     r.bottom_right.x - r.top_left.x
+    // --------------------------------------------------------
+
+    let closure =
+        compile_closure!(
+            |r: Rectangle| -> f64 {
+                r.bottom_right.x - r.top_left.x
+            }
+        );
+
+
+    // --------------------------------------------------------
+    // Compile to LLVM/JIT
+    // --------------------------------------------------------
+
     let compiler =
-        Compiler::new(&context);
+        Compiler::new(
+            &context
+        );
 
 
-    let function =
+    let compiled =
         compiler
-            .compile_i32_binary(
-                &closure
-            )
+            .compile(&closure)
             .expect(
                 "failed to compile closure"
             );
 
 
-    let result =
-        unsafe {
-            function.call(
-                10,
-                20,
-            )
-        };
+    println!(
+        "Closure compiled successfully."
+    );
 
 
     println!(
-        "10 * 2 + 20 = {}",
-        result
+        "Function: {}",
+        compiled.function_name
     );
+
+
+    // --------------------------------------------------------
+    // NOTE:
+    //
+    // The next step is obtaining a correctly typed JIT function
+    // pointer and calling it with &rectangle.
+    //
+    // For example, conceptually:
+    //
+    //     type Fn =
+    //         unsafe extern "C" fn(
+    //             *const Rectangle
+    //         ) -> f64;
+    //
+    // That part should be added once the ABI for generated
+    // structs is finalized.
+    // --------------------------------------------------------
+
+    let _ = rectangle;
 }

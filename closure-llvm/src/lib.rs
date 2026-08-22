@@ -1,9 +1,20 @@
 use inkwell::{
+    builder::Builder,
     context::Context,
-    execution_engine::JitFunction,
+    execution_engine::ExecutionEngine,
     module::Module,
-    types::BasicTypeEnum,
-    values::{BasicValueEnum, IntValue},
+    types::{
+        BasicMetadataTypeEnum,
+        BasicTypeEnum,
+        FunctionType,
+    },
+    values::{
+        BasicValueEnum,
+        FloatValue,
+        IntValue,
+        PointerValue,
+    },
+    AddressSpace,
     OptimizationLevel,
 };
 
@@ -14,7 +25,7 @@ pub use closure_llvm_macro::{
 
 
 // ============================================================
-// Type system
+// Type information
 // ============================================================
 
 #[derive(Debug, Clone)]
@@ -36,8 +47,6 @@ pub enum TypeInfo {
 pub struct FieldInfo {
     pub name: &'static str,
 
-    // Store the function instead of calling it while
-    // initializing a static.
     pub type_info: fn() -> TypeInfo,
 }
 
@@ -63,7 +72,7 @@ pub trait CompileType {
 
 
 // ============================================================
-// Primitive CompileType implementations
+// Primitive types
 // ============================================================
 
 impl CompileType for i32 {
@@ -132,89 +141,36 @@ impl CompileType for bool {
 
 
 // ============================================================
-// TypeInfo helpers
+// TypeInfo -> LLVM
 // ============================================================
 
 impl TypeInfo {
-
-    pub fn field(
-        &self,
-        name: &str,
-    ) -> Option<(usize, TypeInfo)> {
-
-        match self {
-
-            TypeInfo::Struct {
-                fields,
-                ..
-            } => {
-
-                fields
-                    .iter()
-                    .enumerate()
-                    .find(|(_, field)| {
-                        field.name == name
-                    })
-                    .map(|(index, field)| {
-                        (
-                            index,
-                            field.ty(),
-                        )
-                    })
-            }
-
-            _ => None,
-        }
-    }
-
-
     pub fn llvm_type<'ctx>(
         &self,
         context: &'ctx Context,
     ) -> BasicTypeEnum<'ctx> {
-
         match self {
+            TypeInfo::I32 => context.i32_type().into(),
 
-            TypeInfo::I32 => {
-                context.i32_type().into()
-            }
+            TypeInfo::I64 => context.i64_type().into(),
 
-            TypeInfo::I64 => {
-                context.i64_type().into()
-            }
+            TypeInfo::F32 => context.f32_type().into(),
 
-            TypeInfo::F32 => {
-                context.f32_type().into()
-            }
+            TypeInfo::F64 => context.f64_type().into(),
 
-            TypeInfo::F64 => {
-                context.f64_type().into()
-            }
+            TypeInfo::Bool => context.bool_type().into(),
 
-            TypeInfo::Bool => {
-                context.bool_type().into()
-            }
-
-            TypeInfo::Struct {
-                fields,
-                ..
-            } => {
-
-                let llvm_fields: Vec<_> =
+            TypeInfo::Struct { fields, .. } => {
+                let llvm_fields: Vec<BasicTypeEnum<'ctx>> =
                     fields
                         .iter()
                         .map(|field| {
-                            field
-                                .ty()
-                                .llvm_type(context)
+                            field.ty().llvm_type(context)
                         })
                         .collect();
 
                 context
-                    .struct_type(
-                        &llvm_fields,
-                        false,
-                    )
+                    .struct_type(&llvm_fields, false)
                     .into()
             }
         }
@@ -223,7 +179,7 @@ impl TypeInfo {
 
 
 // ============================================================
-// Values
+// Expression IR
 // ============================================================
 
 #[derive(Debug, Clone)]
@@ -236,10 +192,6 @@ pub enum Value {
 }
 
 
-// ============================================================
-// Closure IR
-// ============================================================
-
 #[derive(Debug, Clone)]
 pub enum Expr {
     Argument(usize),
@@ -248,34 +200,38 @@ pub enum Expr {
 
     Field {
         object: Box<Expr>,
-        name: &'static str,
+        name: String,
     },
 
-    Add(
-        Box<Expr>,
-        Box<Expr>,
-    ),
+    Add {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
 
-    Sub(
-        Box<Expr>,
-        Box<Expr>,
-    ),
+    Sub {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
 
-    Mul(
-        Box<Expr>,
-        Box<Expr>,
-    ),
+    Mul {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
 
-    Div(
-        Box<Expr>,
-        Box<Expr>,
-    ),
+    Div {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
 
-    Neg(
-        Box<Expr>,
-    ),
+    Neg {
+        value: Box<Expr>,
+    },
 }
 
+
+// ============================================================
+// Closure IR
+// ============================================================
 
 #[derive(Debug, Clone)]
 pub struct Closure {
@@ -296,62 +252,171 @@ pub struct Compiler<'ctx> {
 }
 
 
-impl<'ctx> Compiler<'ctx> {
+pub struct CompiledClosure<'ctx> {
+    pub engine: ExecutionEngine<'ctx>,
 
+    pub function_name: String,
+}
+
+
+impl<'ctx> Compiler<'ctx> {
     pub fn new(
         context: &'ctx Context,
     ) -> Self {
-        Self {
-            context,
+        Self { context }
+    }
+
+
+    // ========================================================
+    // Argument ABI
+    // ========================================================
+
+    fn llvm_argument_type(
+        &self,
+        ty: &TypeInfo,
+    ) -> BasicMetadataTypeEnum<'ctx> {
+        match ty {
+            TypeInfo::Struct { .. } => {
+                self.context
+                    .ptr_type(AddressSpace::default())
+                    .into()
+            }
+
+            TypeInfo::I32 => {
+                self.context.i32_type().into()
+            }
+
+            TypeInfo::I64 => {
+                self.context.i64_type().into()
+            }
+
+            TypeInfo::F32 => {
+                self.context.f32_type().into()
+            }
+
+            TypeInfo::F64 => {
+                self.context.f64_type().into()
+            }
+
+            TypeInfo::Bool => {
+                self.context.bool_type().into()
+            }
         }
     }
 
 
-    // --------------------------------------------------------
-    // Current demonstration compiler
-    //
-    // Compiles:
-    //
-    // fn(i32, i32) -> i32
-    // --------------------------------------------------------
+    // ========================================================
+    // Return type
+    // ========================================================
 
-    pub fn compile_i32_binary(
+    fn llvm_function_type(
+        &self,
+        return_type: &TypeInfo,
+        arguments: &[BasicMetadataTypeEnum<'ctx>],
+    ) -> Result<FunctionType<'ctx>, String> {
+        match return_type {
+            TypeInfo::I32 => {
+                Ok(
+                    self.context
+                        .i32_type()
+                        .fn_type(arguments, false)
+                )
+            }
+
+            TypeInfo::I64 => {
+                Ok(
+                    self.context
+                        .i64_type()
+                        .fn_type(arguments, false)
+                )
+            }
+
+            TypeInfo::F32 => {
+                Ok(
+                    self.context
+                        .f32_type()
+                        .fn_type(arguments, false)
+                )
+            }
+
+            TypeInfo::F64 => {
+                Ok(
+                    self.context
+                        .f64_type()
+                        .fn_type(arguments, false)
+                )
+            }
+
+            TypeInfo::Bool => {
+                Ok(
+                    self.context
+                        .bool_type()
+                        .fn_type(arguments, false)
+                )
+            }
+
+            TypeInfo::Struct { .. } => {
+                Err(
+                    "struct return values are not yet supported"
+                        .to_string()
+                )
+            }
+        }
+    }
+
+
+    // ========================================================
+    // Compile closure
+    // ========================================================
+
+    pub fn compile(
         &self,
         closure: &Closure,
-    ) -> Result<
-        JitFunction<
-            'ctx,
-            unsafe extern "C" fn(i32, i32) -> i32,
-        >,
-        String,
-    > {
-
+    ) -> Result<CompiledClosure<'ctx>, String> {
         let module =
-            self.context
-                .create_module("closure");
+            self.context.create_module("closure");
 
         let builder =
-            self.context
-                .create_builder();
+            self.context.create_builder();
 
-        let i32_type =
-            self.context.i32_type();
 
-        let fn_type =
-            i32_type.fn_type(
-                &[
-                    i32_type.into(),
-                    i32_type.into(),
-                ],
-                false,
-            );
+        // ----------------------------------------------------
+        // Argument types
+        // ----------------------------------------------------
+
+        let argument_types:
+            Vec<BasicMetadataTypeEnum<'ctx>> =
+            closure
+                .arguments
+                .iter()
+                .map(|ty| {
+                    self.llvm_argument_type(ty)
+                })
+                .collect();
+
+
+        // ----------------------------------------------------
+        // Function type
+        // ----------------------------------------------------
+
+        let function_type =
+            self.llvm_function_type(
+                &closure.return_type,
+                &argument_types,
+            )?;
+
 
         let function =
             module.add_function(
                 "closure",
-                fn_type,
+                function_type,
                 None,
             );
+
+
+        // ----------------------------------------------------
+        // Entry block
+        // ----------------------------------------------------
 
         let entry =
             self.context.append_basic_block(
@@ -361,34 +426,58 @@ impl<'ctx> Compiler<'ctx> {
 
         builder.position_at_end(entry);
 
-        let arguments = [
-            function
-                .get_nth_param(0)
-                .unwrap(),
 
+        // ----------------------------------------------------
+        // Arguments
+        // ----------------------------------------------------
+
+        let arguments =
             function
-                .get_nth_param(1)
-                .unwrap(),
-        ];
+                .get_param_iter()
+                .collect::<Vec<_>>();
+
+
+        // ----------------------------------------------------
+        // Compile body
+        // ----------------------------------------------------
 
         let result =
-            self.compile_i32_expr(
+            self.compile_expr(
                 &builder,
                 &closure.body,
+                &closure.arguments,
                 &arguments,
             )?;
+
+
+        // ----------------------------------------------------
+        // Return
+        // ----------------------------------------------------
 
         builder
             .build_return(Some(&result))
             .map_err(|e| e.to_string())?;
 
+
+        // ----------------------------------------------------
+        // Verify
+        // ----------------------------------------------------
+
         module
             .verify()
             .map_err(|e| e.to_string())?;
 
-        println!("Generated LLVM:");
+
+        // ----------------------------------------------------
+        // Show generated LLVM
+        // ----------------------------------------------------
 
         module.print_to_stderr();
+
+
+        // ----------------------------------------------------
+        // JIT
+        // ----------------------------------------------------
 
         let engine =
             module
@@ -397,42 +486,34 @@ impl<'ctx> Compiler<'ctx> {
                 )
                 .map_err(|e| e.to_string())?;
 
-        unsafe {
-            engine
-                .get_function("closure")
-                .map_err(|e| e.to_string())
-        }
+
+        Ok(
+            CompiledClosure {
+                engine,
+                function_name: "closure".to_string(),
+            }
+        )
     }
 
 
-    // --------------------------------------------------------
-    // Compile i32 expression
-    // --------------------------------------------------------
+    // ========================================================
+    // Expression lowering
+    // ========================================================
 
-    fn compile_i32_expr(
+    fn compile_expr(
         &self,
 
-        builder:
-            &inkwell::builder::Builder<'ctx>,
+        builder: &Builder<'ctx>,
 
         expr: &Expr,
 
-        arguments:
-            &[BasicValueEnum<'ctx>],
-    ) -> Result<
-        IntValue<'ctx>,
-        String,
-    > {
+        argument_types: &[TypeInfo],
 
+        arguments: &[BasicValueEnum<'ctx>],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
         match expr {
-
-            // ------------------------------------------------
-            // Argument
-            // ------------------------------------------------
-
             Expr::Argument(index) => {
-
-                let value =
+                let argument =
                     arguments
                         .get(*index)
                         .ok_or_else(|| {
@@ -442,20 +523,149 @@ impl<'ctx> Compiler<'ctx> {
                             )
                         })?;
 
-                Ok(
-                    value.into_int_value()
+                match argument {
+                    BasicValueEnum::PointerValue(pointer) => {
+                        let ty =
+                            argument_types
+                                .get(*index)
+                                .ok_or_else(|| {
+                                    format!(
+                                        "missing type for argument {}",
+                                        index
+                                    )
+                                })?;
+
+                        let llvm_type =
+                            ty.llvm_type(self.context);
+
+                        builder
+                            .build_load(
+                                llvm_type,
+                                *pointer,
+                                &format!("arg_{}", index),
+                            )
+                            .map_err(|e| e.to_string())
+                    }
+
+                    _ => Ok(*argument),
+                }
+            }
+
+
+            Expr::Constant(value) => {
+                self.compile_constant(value)
+            }
+
+
+            Expr::Field { object, name } => {
+                self.compile_field(
+                    builder,
+                    object,
+                    name,
+                    argument_types,
+                    arguments,
                 )
             }
 
 
-            // ------------------------------------------------
-            // Constant
-            // ------------------------------------------------
+            Expr::Add { lhs, rhs } => {
+                self.compile_binary(
+                    builder,
+                    lhs,
+                    rhs,
+                    argument_types,
+                    arguments,
+                    BinaryOp::Add,
+                )
+            }
 
-            Expr::Constant(
-                Value::I32(value)
-            ) => {
 
+            Expr::Sub { lhs, rhs } => {
+                self.compile_binary(
+                    builder,
+                    lhs,
+                    rhs,
+                    argument_types,
+                    arguments,
+                    BinaryOp::Sub,
+                )
+            }
+
+
+            Expr::Mul { lhs, rhs } => {
+                self.compile_binary(
+                    builder,
+                    lhs,
+                    rhs,
+                    argument_types,
+                    arguments,
+                    BinaryOp::Mul,
+                )
+            }
+
+
+            Expr::Div { lhs, rhs } => {
+                self.compile_binary(
+                    builder,
+                    lhs,
+                    rhs,
+                    argument_types,
+                    arguments,
+                    BinaryOp::Div,
+                )
+            }
+
+
+            Expr::Neg { value } => {
+                let value =
+                    self.compile_expr(
+                        builder,
+                        value,
+                        argument_types,
+                        arguments,
+                    )?;
+
+                match value {
+                    BasicValueEnum::IntValue(value) => {
+                        builder
+                            .build_int_neg(
+                                value,
+                                "neg",
+                            )
+                            .map(|v| v.into())
+                            .map_err(|e| e.to_string())
+                    }
+
+                    BasicValueEnum::FloatValue(value) => {
+                        builder
+                            .build_float_neg(
+                                value,
+                                "neg",
+                            )
+                            .map(|v| v.into())
+                            .map_err(|e| e.to_string())
+                    }
+
+                    _ => Err(
+                        "negation requires a numeric value"
+                            .to_string()
+                    ),
+                }
+            }
+        }
+    }
+
+
+    // ========================================================
+    // Constants
+    // ========================================================
+
+    fn compile_constant(
+        &self,
+        value: &Value,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        match value {
+            Value::I32(value) => {
                 Ok(
                     self.context
                         .i32_type()
@@ -463,258 +673,434 @@ impl<'ctx> Compiler<'ctx> {
                             *value as u64,
                             true,
                         )
+                        .into()
                 )
             }
 
+            Value::I64(value) => {
+                Ok(
+                    self.context
+                        .i64_type()
+                        .const_int(
+                            *value as u64,
+                            true,
+                        )
+                        .into()
+                )
+            }
 
-            // ------------------------------------------------
-            // Addition
-            // ------------------------------------------------
+            Value::F32(value) => {
+                Ok(
+                    self.context
+                        .f32_type()
+                        .const_float(
+                            *value as f64,
+                        )
+                        .into()
+                )
+            }
 
-            Expr::Add(
-                lhs,
-                rhs,
-            ) => {
+            Value::F64(value) => {
+                Ok(
+                    self.context
+                        .f64_type()
+                        .const_float(*value)
+                        .into()
+                )
+            }
 
-                let lhs =
-                    self.compile_i32_expr(
-                        builder,
-                        lhs,
-                        arguments,
-                    )?;
+            Value::Bool(value) => {
+                Ok(
+                    self.context
+                        .bool_type()
+                        .const_int(
+                            if *value { 1 } else { 0 },
+                            false,
+                        )
+                        .into()
+                )
+            }
+        }
+    }
 
-                let rhs =
-                    self.compile_i32_expr(
-                        builder,
-                        rhs,
-                        arguments,
-                    )?;
 
-                builder
-                    .build_int_add(
-                        lhs,
-                        rhs,
-                        "add",
+    // ========================================================
+    // Field access
+    // ========================================================
+
+    fn compile_field(
+        &self,
+
+        builder: &Builder<'ctx>,
+
+        object: &Expr,
+
+        field_name: &str,
+
+        argument_types: &[TypeInfo],
+
+        arguments: &[BasicValueEnum<'ctx>],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let (
+            pointer,
+            object_type,
+        ) =
+            self.compile_lvalue(
+                builder,
+                object,
+                argument_types,
+                arguments,
+            )?;
+
+
+        let TypeInfo::Struct {
+            fields,
+            ..
+        } =
+            &object_type
+        else {
+            return Err(
+                format!(
+                    "cannot access field `{}` on non-struct",
+                    field_name
+                )
+            );
+        };
+
+
+        let (
+            index,
+            field_type,
+        ) =
+            fields
+                .iter()
+                .enumerate()
+                .find_map(|(index, field)| {
+                    if field.name == field_name {
+                        Some((index, field.ty()))
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "field `{}` not found",
+                        field_name
                     )
-                    .map_err(|e| e.to_string())
+                })?;
+
+
+        let struct_type =
+            object_type
+                .llvm_type(self.context)
+                .into_struct_type();
+
+
+        let field_pointer =
+            builder
+                .build_struct_gep(
+                    struct_type,
+                    pointer,
+                    index as u32,
+                    field_name,
+                )
+                .map_err(|e| e.to_string())?;
+
+
+        builder
+            .build_load(
+                field_type.llvm_type(self.context),
+                field_pointer,
+                field_name,
+            )
+            .map_err(|e| e.to_string())
+    }
+
+
+    // ========================================================
+    // L-value
+    // ========================================================
+
+    fn compile_lvalue(
+        &self,
+
+        builder: &Builder<'ctx>,
+
+        expr: &Expr,
+
+        argument_types: &[TypeInfo],
+
+        arguments: &[BasicValueEnum<'ctx>],
+    ) -> Result<
+        (PointerValue<'ctx>, TypeInfo),
+        String,
+    > {
+        match expr {
+            Expr::Argument(index) => {
+                let argument =
+                    arguments
+                        .get(*index)
+                        .ok_or_else(|| {
+                            format!(
+                                "invalid argument index {}",
+                                index
+                            )
+                        })?;
+
+
+                let pointer =
+                    match argument {
+                        BasicValueEnum::PointerValue(pointer) => {
+                            *pointer
+                        }
+
+                        _ => {
+                            return Err(
+                                format!(
+                                    "argument {} is not a pointer",
+                                    index
+                                )
+                            )
+                        }
+                    };
+
+
+                let type_info =
+                    argument_types
+                        .get(*index)
+                        .ok_or_else(|| {
+                            format!(
+                                "missing argument type {}",
+                                index
+                            )
+                        })?
+                        .clone();
+
+
+                Ok((pointer, type_info))
             }
 
 
-            // ------------------------------------------------
-            // Subtraction
-            // ------------------------------------------------
-
-            Expr::Sub(
-                lhs,
-                rhs,
-            ) => {
-
-                let lhs =
-                    self.compile_i32_expr(
+            Expr::Field {
+                object,
+                name,
+            } => {
+                let (
+                    object_pointer,
+                    object_type,
+                ) =
+                    self.compile_lvalue(
                         builder,
-                        lhs,
+                        object,
+                        argument_types,
                         arguments,
                     )?;
 
-                let rhs =
-                    self.compile_i32_expr(
-                        builder,
-                        rhs,
-                        arguments,
-                    )?;
 
-                builder
-                    .build_int_sub(
-                        lhs,
-                        rhs,
-                        "sub",
-                    )
-                    .map_err(|e| e.to_string())
+                let TypeInfo::Struct {
+                    fields,
+                    ..
+                } =
+                    &object_type
+                else {
+                    return Err(
+                        format!(
+                            "`{}` is not a struct",
+                            name
+                        )
+                    );
+                };
+
+
+                let (
+                    index,
+                    field_type,
+                ) =
+                    fields
+                        .iter()
+                        .enumerate()
+                        .find_map(|(index, field)| {
+                            if field.name == name {
+                                Some((index, field.ty()))
+                            } else {
+                                None
+                            }
+                        })
+                        .ok_or_else(|| {
+                            format!(
+                                "field `{}` not found",
+                                name
+                            )
+                        })?;
+
+
+                let struct_type =
+                    object_type
+                        .llvm_type(self.context)
+                        .into_struct_type();
+
+
+                let field_pointer =
+                    builder
+                        .build_struct_gep(
+                            struct_type,
+                            object_pointer,
+                            index as u32,
+                            name,
+                        )
+                        .map_err(|e| e.to_string())?;
+
+
+                Ok((
+                    field_pointer,
+                    field_type,
+                ))
             }
 
 
-            // ------------------------------------------------
-            // Multiplication
-            // ------------------------------------------------
+            _ => Err(
+                "expression cannot be used as an lvalue"
+                    .to_string()
+            ),
+        }
+    }
 
-            Expr::Mul(
+
+    // ========================================================
+    // Binary operations
+    // ========================================================
+
+    fn compile_binary(
+        &self,
+
+        builder: &Builder<'ctx>,
+
+        lhs: &Expr,
+
+        rhs: &Expr,
+
+        argument_types: &[TypeInfo],
+
+        arguments: &[BasicValueEnum<'ctx>],
+
+        operation: BinaryOp,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let lhs =
+            self.compile_expr(
+                builder,
                 lhs,
+                argument_types,
+                arguments,
+            )?;
+
+
+        let rhs =
+            self.compile_expr(
+                builder,
                 rhs,
+                argument_types,
+                arguments,
+            )?;
+
+
+        match (lhs, rhs) {
+            (
+                BasicValueEnum::IntValue(lhs),
+                BasicValueEnum::IntValue(rhs),
             ) => {
-
-                let lhs =
-                    self.compile_i32_expr(
-                        builder,
-                        lhs,
-                        arguments,
-                    )?;
-
-                let rhs =
-                    self.compile_i32_expr(
-                        builder,
-                        rhs,
-                        arguments,
-                    )?;
-
-                builder
-                    .build_int_mul(
-                        lhs,
-                        rhs,
-                        "mul",
-                    )
-                    .map_err(|e| e.to_string())
-            }
-
-
-            // ------------------------------------------------
-            // Division
-            // ------------------------------------------------
-
-            Expr::Div(
-                lhs,
-                rhs,
-            ) => {
-
-                let lhs =
-                    self.compile_i32_expr(
-                        builder,
-                        lhs,
-                        arguments,
-                    )?;
-
-                let rhs =
-                    self.compile_i32_expr(
-                        builder,
-                        rhs,
-                        arguments,
-                    )?;
-
-                builder
-                    .build_int_signed_div(
-                        lhs,
-                        rhs,
-                        "div",
-                    )
-                    .map_err(|e| e.to_string())
-            }
-
-
-            // ------------------------------------------------
-            // Negation
-            // ------------------------------------------------
-
-            Expr::Neg(value) => {
-
                 let value =
-                    self.compile_i32_expr(
-                        builder,
-                        value,
-                        arguments,
-                    )?;
+                    match operation {
+                        BinaryOp::Add =>
+                            builder.build_int_add(
+                                lhs,
+                                rhs,
+                                "add",
+                            ),
 
-                builder
-                    .build_int_neg(
-                        value,
-                        "neg",
-                    )
-                    .map_err(|e| e.to_string())
+                        BinaryOp::Sub =>
+                            builder.build_int_sub(
+                                lhs,
+                                rhs,
+                                "sub",
+                            ),
+
+                        BinaryOp::Mul =>
+                            builder.build_int_mul(
+                                lhs,
+                                rhs,
+                                "mul",
+                            ),
+
+                        BinaryOp::Div =>
+                            builder.build_int_signed_div(
+                                lhs,
+                                rhs,
+                                "div",
+                            ),
+                    }
+                    .map_err(|e| e.to_string())?;
+
+                Ok(value.into())
             }
 
 
-            // ------------------------------------------------
-            // Struct field
-            //
-            // Not implemented by the i32 demonstration
-            // compiler yet.
-            // ------------------------------------------------
+            (
+                BasicValueEnum::FloatValue(lhs),
+                BasicValueEnum::FloatValue(rhs),
+            ) => {
+                let value =
+                    match operation {
+                        BinaryOp::Add =>
+                            builder.build_float_add(
+                                lhs,
+                                rhs,
+                                "add",
+                            ),
 
-            Expr::Field { .. } => {
-                Err(
-                    "struct field access requires \
-                     struct argument lowering"
-                        .into()
-                )
+                        BinaryOp::Sub =>
+                            builder.build_float_sub(
+                                lhs,
+                                rhs,
+                                "sub",
+                            ),
+
+                        BinaryOp::Mul =>
+                            builder.build_float_mul(
+                                lhs,
+                                rhs,
+                                "mul",
+                            ),
+
+                        BinaryOp::Div =>
+                            builder.build_float_div(
+                                lhs,
+                                rhs,
+                                "div",
+                            ),
+                    }
+                    .map_err(|e| e.to_string())?;
+
+                Ok(value.into())
             }
 
 
-            // ------------------------------------------------
-            // Wrong constant type
-            // ------------------------------------------------
-
-            Expr::Constant(_) => {
-                Err(
-                    "non-i32 constant in i32 expression"
-                        .into()
-                )
-            }
+            _ => Err(
+                "binary operands must have the same numeric type"
+                    .to_string()
+            ),
         }
     }
 }
 
 
 // ============================================================
-// Tests
+// Binary operation
 // ============================================================
 
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-
-    #[derive(Debug, CompileType)]
-    struct Point {
-        x: f64,
-        y: f64,
-    }
-
-
-    #[test]
-    fn point_type_information() {
-
-        let info =
-            Point::type_info();
-
-        match info {
-
-            TypeInfo::Struct {
-                name,
-                fields,
-            } => {
-
-                assert_eq!(
-                    name,
-                    "Point"
-                );
-
-                assert_eq!(
-                    fields.len(),
-                    2
-                );
-
-                assert_eq!(
-                    fields[0].name,
-                    "x"
-                );
-
-                assert_eq!(
-                    fields[1].name,
-                    "y"
-                );
-
-                assert!(
-                    matches!(
-                        fields[0].ty(),
-                        TypeInfo::F64
-                    )
-                );
-            }
-
-            _ => {
-                panic!(
-                    "expected struct"
-                );
-            }
-        }
-    }
+#[derive(Debug, Clone, Copy)]
+enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
 }
