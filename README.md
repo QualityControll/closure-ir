@@ -35,3 +35,34 @@ rust-closure-llvm/
     ├── Cargo.toml
     └── src/
         └── main.rs
+
+## Roadmap
+
+ - [ ] Generalize LLVM type lowering
+ - [ ] Complete struct argument lowering
+ - [ ] Struct field access in LLVM
+ - [ ] Floating-point expressions
+ - [ ] Boolean expressions
+ - [ ] Comparisons
+ - [ ] Conditional expressions
+ - [ ] if expressions
+ - [ ] Local variables
+ - [ ] Multiple statements
+ - [ ] Function calls
+ - [ ] Nested expressions
+ - [ ] Arrays
+ - [ ] Tuples
+ - [ ] Enums
+ - [ ] Generic types
+ - [ ] Better error reporting
+ - [ ] LLVM optimization passes
+ - [ ] A stable executable-function API
+ - [ ] Benchmark generated LLVM against native Rust
+ - [ ] Support more complex user-defined types
+ - [ ] Explore automatic serialization/deserialization
+ - [ ] Explore distributed execution
+
+ ## License
+
+ License information will be added as the project develops.
+
