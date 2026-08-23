@@ -12,6 +12,7 @@ use crate::parser::ClosureArgument;
 use super::expression::{
     expression_type,
     lower_expr,
+    LocalVariable,
 };
 
 
@@ -22,6 +23,7 @@ use super::expression::{
 pub(crate) fn lower_binary(
     binary: &ExprBinary,
     arguments: &[ClosureArgument],
+    locals: &[LocalVariable],
     expected_type: Option<&Type>,
 ) -> syn::Result<TokenStream> {
     let operand_type =
@@ -42,6 +44,7 @@ pub(crate) fn lower_binary(
         lower_expr(
             &binary.left,
             arguments,
+            locals,
             operand_type,
         )?;
 
@@ -49,6 +52,7 @@ pub(crate) fn lower_binary(
         lower_expr(
             &binary.right,
             arguments,
+            locals,
             operand_type,
         )?;
 
