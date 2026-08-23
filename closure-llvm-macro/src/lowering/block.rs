@@ -157,3 +157,99 @@ fn lower_stmts(
             ),
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quote::quote;
+
+    fn lower(source: TokenStream) -> syn::Result<TokenStream> {
+        let block = syn::parse2::<syn::Block>(source)?;
+
+        lower_block(
+            &block,
+            &[],
+            &[],
+            None,
+        )
+    }
+
+    #[test]
+    fn lowers_let_binding() {
+        let result =
+            lower(
+                quote! {
+                    {
+                        let x = 10;
+                        x
+                    }
+                }
+            )
+            .unwrap();
+
+        assert_eq!(
+            result.to_string(),
+            quote! {
+                ::closure_llvm::Expr::Constant(
+                    ::closure_llvm::Value::I32(10)
+                )
+            }
+            .to_string()
+        );
+    }
+
+    #[test]
+    fn lowers_multiple_let_bindings() {
+        let result =
+            lower(
+                quote! {
+                    {
+                        let x = 10;
+                        let y = x + 2;
+                        y
+                    }
+                }
+            )
+            .unwrap();
+
+        assert_eq!(
+            result.to_string(),
+            quote! {
+                ::closure_llvm::Expr::Add {
+                    lhs: Box::new(
+                        ::closure_llvm::Expr::Constant(
+                            ::closure_llvm::Value::I32(10)
+                        )
+                    ),
+                    rhs: Box::new(
+                        ::closure_llvm::Expr::Constant(
+                            ::closure_llvm::Value::I32(2)
+                        )
+                    ),
+                }
+            }
+            .to_string()
+        );
+    }
+
+    #[test]
+    fn rejects_let_without_initializer() {
+        let error =
+            lower(
+                quote! {
+                    {
+                        let x;
+                        x
+                    }
+                }
+            )
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("let bindings require an initializer")
+        );
+    }
+}
