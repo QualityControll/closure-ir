@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Expr {
     Argument(usize),
-    Local(usize),
     Constant(Value),
     Field { object: Box<Expr>, name: String },
     Tuple { elements: Vec<Expr> },
