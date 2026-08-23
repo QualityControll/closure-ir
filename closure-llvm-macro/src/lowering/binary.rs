@@ -30,14 +30,20 @@ pub(crate) fn lower_binary(
         expression_type(
             &binary.left,
             arguments,
+            locals,
         )
         .or_else(|| {
             expression_type(
                 &binary.right,
                 arguments,
+                locals,
             )
-        })
-        .or(expected_type);
+        });
+
+    let operand_type =
+        operand_type
+            .as_ref()
+            .or(expected_type);
 
 
     let lhs =
