@@ -6,7 +6,10 @@ use syn::ExprField;
 
 use crate::parser::ClosureArgument;
 
-use super::expression::lower_expr;
+use super::expression::{
+    lower_expr,
+    LocalVariable,
+};
 
 
 // ============================================================
@@ -16,11 +19,13 @@ use super::expression::lower_expr;
 pub(crate) fn lower_field(
     field: &ExprField,
     arguments: &[ClosureArgument],
+    locals: &[LocalVariable],
 ) -> syn::Result<TokenStream> {
     let object =
         lower_expr(
             &field.base,
             arguments,
+            locals,
             None,
         )?;
 
