@@ -169,7 +169,7 @@ fn main() {
  - [x] Comparisons
  - [x] Conditional expressions
  - [x] if expressions
- - [ ] Local variables
+ - [x] Local variables
  - [ ] Multiple statements
  - [ ] Function calls
  - [ ] Nested expressions
