@@ -19,12 +19,24 @@ use super::{
 
 
 // ============================================================
+// Local variable
+// ============================================================
+
+#[derive(Clone)]
+pub(crate) struct LocalVariable {
+    pub(crate) name: syn::Ident,
+    pub(crate) value: TokenStream,
+}
+
+
+// ============================================================
 // Expression
 // ============================================================
 
 pub(crate) fn lower_expr(
     expr: &SynExpr,
     arguments: &[ClosureArgument],
+    locals: &[LocalVariable],
     expected_type: Option<&Type>,
 ) -> syn::Result<TokenStream> {
     match expr {
@@ -32,6 +44,8 @@ pub(crate) fn lower_expr(
             path::lower_path(
                 path,
                 arguments,
+                locals,
+                expected_type,
             ),
 
         SynExpr::Lit(literal) =>
@@ -44,6 +58,7 @@ pub(crate) fn lower_expr(
             binary::lower_binary(
                 binary,
                 arguments,
+                locals,
                 expected_type,
             ),
 
@@ -51,6 +66,7 @@ pub(crate) fn lower_expr(
             unary::lower_unary(
                 unary,
                 arguments,
+                locals,
                 expected_type,
             ),
 
@@ -58,6 +74,7 @@ pub(crate) fn lower_expr(
             if_else::lower_if(
                 if_expr,
                 arguments,
+                locals,
                 expected_type,
             ),
 
@@ -65,18 +82,21 @@ pub(crate) fn lower_expr(
             tuple::lower_tuple(
                 tuple,
                 arguments,
+                locals,
             ),
 
         SynExpr::Field(field) =>
             field::lower_field(
                 field,
                 arguments,
+                locals,
             ),
 
         SynExpr::Paren(paren) =>
             lower_expr(
                 &paren.expr,
                 arguments,
+                locals,
                 expected_type,
             ),
 
