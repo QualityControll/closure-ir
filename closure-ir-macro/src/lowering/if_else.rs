@@ -30,7 +30,7 @@ pub(crate) fn lower_if(
     };
 
     Ok(quote! {
-        ::closure_llvm::Expr::IfElse {
+        ::closure_ir::Expr::IfElse {
             condition: Box::new(#condition),
             then_branch: Box::new(#then_branch),
             else_branch: Box::new(#else_branch),

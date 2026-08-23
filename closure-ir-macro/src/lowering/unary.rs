@@ -38,12 +38,12 @@ pub(crate) fn lower_unary(
         match unary.op {
             syn::UnOp::Not(_) =>
                 quote! {
-                    ::closure_llvm::Expr::Not
+                    ::closure_ir::Expr::Not
                 },
 
             syn::UnOp::Neg(_) =>
                 quote! {
-                    ::closure_llvm::Expr::Neg
+                    ::closure_ir::Expr::Neg
                 },
 
             _ =>

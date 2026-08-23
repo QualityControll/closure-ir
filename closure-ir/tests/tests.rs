@@ -912,7 +912,7 @@ mod tests {
 
         let context = inkwell::context::Context::create();
 
-        let compiler = closure_llvm::Compiler::new(&context);
+        let compiler = closure_ir::Compiler::new(&context);
 
         let compiled = compiler
             .compile_dynamic(&closure)
@@ -920,11 +920,11 @@ mod tests {
 
         let result = unsafe {
             compiled
-                .call(&[closure_llvm::Value::I32(10), closure_llvm::Value::I32(20)])
+                .call(&[closure_ir::Value::I32(10), closure_ir::Value::I32(20)])
                 .expect("failed to invoke closure")
         };
 
-        assert_eq!(result, closure_llvm::Value::I32(30));
+        assert_eq!(result, closure_ir::Value::I32(30));
     }
 
     #[test]

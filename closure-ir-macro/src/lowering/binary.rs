@@ -67,92 +67,92 @@ pub(crate) fn lower_binary(
         match binary.op {
             syn::BinOp::Add(_) =>
                 quote! {
-                    ::closure_llvm::Expr::Add
+                    ::closure_ir::Expr::Add
                 },
 
             syn::BinOp::Sub(_) =>
                 quote! {
-                    ::closure_llvm::Expr::Sub
+                    ::closure_ir::Expr::Sub
                 },
 
             syn::BinOp::Mul(_) =>
                 quote! {
-                    ::closure_llvm::Expr::Mul
+                    ::closure_ir::Expr::Mul
                 },
 
             syn::BinOp::Div(_) =>
                 quote! {
-                    ::closure_llvm::Expr::Div
+                    ::closure_ir::Expr::Div
                 },
 
             syn::BinOp::Rem(_) =>
                 quote! {
-                    ::closure_llvm::Expr::Rem
+                    ::closure_ir::Expr::Rem
                 },
 
             syn::BinOp::Eq(_) =>
                 quote! {
-                    ::closure_llvm::Expr::Eq
+                    ::closure_ir::Expr::Eq
                 },
 
             syn::BinOp::Ne(_) =>
                 quote! {
-                    ::closure_llvm::Expr::Ne
+                    ::closure_ir::Expr::Ne
                 },
 
             syn::BinOp::Lt(_) =>
                 quote! {
-                    ::closure_llvm::Expr::Lt
+                    ::closure_ir::Expr::Lt
                 },
 
             syn::BinOp::Le(_) =>
                 quote! {
-                    ::closure_llvm::Expr::Le
+                    ::closure_ir::Expr::Le
                 },
 
             syn::BinOp::Gt(_) =>
                 quote! {
-                    ::closure_llvm::Expr::Gt
+                    ::closure_ir::Expr::Gt
                 },
 
             syn::BinOp::Ge(_) =>
                 quote! {
-                    ::closure_llvm::Expr::Ge
+                    ::closure_ir::Expr::Ge
                 },
 
             syn::BinOp::And(_) =>
                 quote! {
-                    ::closure_llvm::Expr::And
+                    ::closure_ir::Expr::And
                 },
 
             syn::BinOp::Or(_) =>
                 quote! {
-                    ::closure_llvm::Expr::Or
+                    ::closure_ir::Expr::Or
                 },
 
             syn::BinOp::BitAnd(_) =>
                 quote! {
-                    ::closure_llvm::Expr::BitAnd
+                    ::closure_ir::Expr::BitAnd
                 },
 
             syn::BinOp::BitOr(_) =>
                 quote! {
-                    ::closure_llvm::Expr::BitOr
+                    ::closure_ir::Expr::BitOr
                 },
 
             syn::BinOp::BitXor(_) =>
                 quote! {
-                    ::closure_llvm::Expr::BitXor
+                    ::closure_ir::Expr::BitXor
                 },
 
             syn::BinOp::Shl(_) =>
                 quote! {
-                    ::closure_llvm::Expr::Shl
+                    ::closure_ir::Expr::Shl
                 },
 
             syn::BinOp::Shr(_) =>
                 quote! {
-                    ::closure_llvm::Expr::Shr
+                    ::closure_ir::Expr::Shr
                 },
 
             _ =>

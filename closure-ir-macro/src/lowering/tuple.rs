@@ -38,7 +38,7 @@ pub(crate) fn lower_tuple(
 
     Ok(
         quote! {
-            ::closure_llvm::Expr::Tuple {
+            ::closure_ir::Expr::Tuple {
                 elements: vec![
                     #(
                         #elements

@@ -32,15 +32,15 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
                 let local_type = explicit_type.or_else(|| expression_type(&initializer.expr, arguments, &current_locals)).ok_or_else(|| syn::Error::new_spanned(&initializer.expr, "cannot infer local variable type"))?;
                 let value = lower_expr(&initializer.expr, arguments, &current_locals, Some(&local_type))?;
                 let index = current_locals.len();
-                let type_info = quote! { <#local_type as ::closure_llvm::CompileType>::type_info() };
-                statement_tokens.push(quote! { ::closure_llvm::Statement::Let { local: #index, type_info: #type_info, value: #value, mutable: #mutable } });
+                let type_info = quote! { <#local_type as ::closure_ir::CompileType>::type_info() };
+                statement_tokens.push(quote! { ::closure_ir::Statement::Let { local: #index, type_info: #type_info, value: #value, mutable: #mutable } });
                 current_locals.push(LocalVariable { name, index, type_info: Some(local_type), mutable });
             }
             Stmt::Expr(expr, _) => {
                 if let syn::Expr::While(while_expr) = expr {
                     let condition = lower_expr(&while_expr.cond, arguments, &current_locals, Some(&syn::parse_quote!(bool)))?;
                     let body = lower_block(&while_expr.body, arguments, &current_locals, None)?;
-                    statement_tokens.push(quote! { ::closure_llvm::Statement::While { condition: #condition, body: #body } });
+                    statement_tokens.push(quote! { ::closure_ir::Statement::While { condition: #condition, body: #body } });
                     continue;
                 }
                 if let syn::Expr::ForLoop(for_expr) = expr {
@@ -58,19 +58,19 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
                     let start_expr = lower_expr(start, arguments, &current_locals, Some(&local_type))?;
                     let end_expr = lower_expr(end, arguments, &current_locals, Some(&local_type))?;
                     let local_index = current_locals.len();
-                    let type_info = quote! { <#local_type as ::closure_llvm::CompileType>::type_info() };
+                    let type_info = quote! { <#local_type as ::closure_ir::CompileType>::type_info() };
                     let mut body_locals = current_locals.clone();
                     body_locals.push(LocalVariable { name: name.clone(), index: local_index, type_info: Some(local_type.clone()), mutable: false });
                     let body = lower_block(&for_expr.body, arguments, &body_locals, None)?;
                     let inclusive = matches!(range.limits, syn::RangeLimits::Closed(_));
-                    statement_tokens.push(quote! { ::closure_llvm::Statement::For { local: #local_index, type_info: #type_info, start: #start_expr, end: #end_expr, inclusive: #inclusive, body: #body } });
+                    statement_tokens.push(quote! { ::closure_ir::Statement::For { local: #local_index, type_info: #type_info, start: #start_expr, end: #end_expr, inclusive: #inclusive, body: #body } });
                     current_locals.push(LocalVariable { name, index: local_index, type_info: Some(local_type), mutable: false });
                     continue;
                 }
                 if let syn::Expr::Assign(assign) = expr {
                     let (index, expected) = assignment_target(assign, &current_locals)?;
                     let value = lower_expr(&assign.right, arguments, &current_locals, expected)?;
-                    statement_tokens.push(quote! { ::closure_llvm::Statement::Assign { local: #index, value: #value } });
+                    statement_tokens.push(quote! { ::closure_ir::Statement::Assign { local: #index, value: #value } });
                     continue;
                 }
                 if !is_last { return Err(syn::Error::new_spanned(expr, "only let bindings, assignments, while loops, and for loops may precede the final expression")); }
@@ -82,7 +82,7 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
 
     if result.is_none() && expected_type.is_some() { return Err(syn::Error::new(proc_macro2::Span::call_site(), "closure block must end with an expression")); }
     let result_tokens = match result { Some(result) => quote! { Some(#result) }, None => quote! { None } };
-    Ok(quote! { ::closure_llvm::Block { statements: vec![#(#statement_tokens),*], result: #result_tokens } })
+    Ok(quote! { ::closure_ir::Block { statements: vec![#(#statement_tokens),*], result: #result_tokens } })
 }
 
 fn assignment_target<'a>(assign: &ExprAssign, locals: &'a [LocalVariable]) -> syn::Result<(usize, Option<&'a Type>)> {
