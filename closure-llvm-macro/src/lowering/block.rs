@@ -1,11 +1,15 @@
 use proc_macro2::TokenStream;
 
 use syn::{
+    Pat,
     Stmt,
     Type,
 };
 
-use crate::lowering::expression::lower_expr;
+use crate::lowering::expression::{
+    lower_expr,
+    LocalVariable,
+};
 use crate::parser::ClosureArgument;
 
 
@@ -16,30 +20,133 @@ use crate::parser::ClosureArgument;
 pub(crate) fn lower_block(
     block: &syn::Block,
     arguments: &[ClosureArgument],
+    locals: &[LocalVariable],
     expected_type: Option<&Type>,
 ) -> syn::Result<TokenStream> {
-    if block.stmts.len() != 1 {
-        return Err(
-            syn::Error::new_spanned(
-                block,
-                "compiled closure blocks must contain exactly one expression",
-            )
-        );
-    }
+    lower_stmts(
+        &block.stmts,
+        arguments,
+        locals,
+        expected_type,
+    )
+}
 
-    match &block.stmts[0] {
-        Stmt::Expr(expr, _) =>
+
+fn lower_stmts(
+    statements: &[Stmt],
+    arguments: &[ClosureArgument],
+    locals: &[LocalVariable],
+    expected_type: Option<&Type>,
+) -> syn::Result<TokenStream> {
+    let statement =
+        statements
+            .first()
+            .ok_or_else(|| {
+                syn::Error::new(
+                    proc_macro2::Span::call_site(),
+                    "compiled closure blocks cannot be empty",
+                )
+            })?;
+
+    match statement {
+        Stmt::Local(local) => {
+            let name =
+                match &local.pat {
+                    Pat::Ident(pattern) =>
+                        pattern.ident.clone(),
+
+                    Pat::Type(pattern) =>
+                        match &*pattern.pat {
+                            Pat::Ident(pattern) =>
+                                pattern.ident.clone(),
+
+                            _ =>
+                                return Err(
+                                    syn::Error::new_spanned(
+                                        &pattern.pat,
+                                        "let bindings must use identifiers",
+                                    )
+                                ),
+                        },
+
+                    _ =>
+                        return Err(
+                            syn::Error::new_spanned(
+                                &local.pat,
+                                "let bindings must use identifiers",
+                            )
+                        ),
+                };
+
+            let initializer =
+                local
+                    .init
+                    .as_ref()
+                    .ok_or_else(|| {
+                        syn::Error::new_spanned(
+                            local,
+                            "let bindings require an initializer",
+                        )
+                    })?;
+
+            let local_type =
+                match &local.pat {
+                    Pat::Type(pattern) =>
+                        Some(&*pattern.ty),
+
+                    _ =>
+                        None,
+                };
+
+            let value =
+                lower_expr(
+                    &initializer.expr,
+                    arguments,
+                    locals,
+                    local_type,
+                )?;
+
+            let mut next_locals =
+                locals.to_vec();
+
+            next_locals.push(
+                LocalVariable {
+                    name,
+                    value,
+                }
+            );
+
+            lower_stmts(
+                &statements[1..],
+                arguments,
+                &next_locals,
+                expected_type,
+            )
+        }
+
+        Stmt::Expr(expr, _) => {
+            if statements.len() != 1 {
+                return Err(
+                    syn::Error::new_spanned(
+                        &statements[1],
+                        "only let bindings may precede the final expression",
+                    )
+                );
+            }
+
             lower_expr(
                 expr,
                 arguments,
+                locals,
                 expected_type,
-            ),
+            )
+        }
 
         other =>
             Err(
                 syn::Error::new_spanned(
                     other,
-                    "only expressions are supported",
+                    "only let bindings and a final expression are supported",
                 )
             ),
     }
