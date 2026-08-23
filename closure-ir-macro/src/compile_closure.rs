@@ -19,7 +19,7 @@ fn expand_compile_closure(input: ClosureInput) -> syn::Result<proc_macro2::Token
 
     let argument_type_infos = arguments.iter().map(|argument| {
         let ty = &argument.type_info;
-        quote! { <#ty as ::closure_llvm::CompileType>::type_info() }
+        quote! { <#ty as ::closure_ir::CompileType>::type_info() }
     }).collect::<Vec<_>>();
 
     let argument_types = arguments.iter().map(|argument| &argument.type_info).collect::<Vec<_>>();
@@ -31,15 +31,15 @@ fn expand_compile_closure(input: ClosureInput) -> syn::Result<proc_macro2::Token
 
     Ok(quote! {
         {
-            let __closure = ::closure_llvm::Closure {
+            let __closure = ::closure_ir::Closure {
                 arguments: vec![#(#argument_type_infos),*],
-                return_type: <#return_type as ::closure_llvm::CompileType>::type_info(),
+                return_type: <#return_type as ::closure_ir::CompileType>::type_info(),
                 body: #block,
             };
             let __context: &'static ::inkwell::context::Context = Box::leak(
                 Box::new(::inkwell::context::Context::create())
             );
-            let __compiler = ::closure_llvm::Compiler::new(__context);
+            let __compiler = ::closure_ir::Compiler::new(__context);
             __compiler.compile::<#tuple_type, #return_type>(&__closure)
                 .expect("failed to compile closure")
         }

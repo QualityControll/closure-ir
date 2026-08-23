@@ -1,4 +1,4 @@
-use closure_llvm::{
+use closure_ir::{
     call,
     compile_closure,
     quote_closure,

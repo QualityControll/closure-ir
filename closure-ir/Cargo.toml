@@ -1,10 +1,10 @@
 [package]
-name = "closure-llvm"
+name = "closure-ir"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 inkwell = { version = "0.10.0", features = ["llvm22-1"] }
-closure-llvm-macro = { path = "../closure-llvm-macro" }
+closure-ir-macro = { path = "../closure-ir-macro" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
