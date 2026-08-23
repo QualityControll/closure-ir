@@ -1,4 +1,4 @@
-# Rust Closure → LLVM
+# Rust Closure → IR
 
 An experimental Rust library for turning Rust closures into an intermediate representation (IR) using procedural macros, and then compiling that IR to executable LLVM code with [Inkwell](https://github.com/TheDan64/inkwell).
 
@@ -21,13 +21,13 @@ The goal is to explore whether Rust's compiler-visible syntax and procedural mac
 The project is split into two crates:
 
 ```text
-rust-closure-llvm/
+closure-ir/
 │
-├── closure-llvm/
+├── closure-ir/
 │   └── src/
 │       └── lib.rs
 │
-├── closure-llvm-macro/
+├── closure-ir-macro/
 │   └── src/
 │       └── lib.rs
 │
@@ -36,10 +36,11 @@ rust-closure-llvm/
     └── src/
         └── main.rs
 ```
+
 ## Example
 
 ```rust
-use closure_llvm::{
+use closure_ir::{
     call,
     compile_closure,
     CompileType,
@@ -185,7 +186,6 @@ fn main() {
  - [ ] Explore automatic serialization/deserialization
  - [ ] Explore distributed execution
 
- ## License
+## License
 
- License information will be added as the project develops.
-
+License information will be added as the project develops.

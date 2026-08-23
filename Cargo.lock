@@ -25,17 +25,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "closure-llvm"
+name = "closure-ir"
 version = "0.1.0"
 dependencies = [
- "closure-llvm-macro",
+ "closure-ir-macro",
  "inkwell",
  "serde",
  "serde_json",
 ]
 
 [[package]]
-name = "closure-llvm-macro"
+name = "closure-ir-macro"
 version = "0.1.0"
 dependencies = [
  "proc-macro2",
@@ -47,7 +47,7 @@ dependencies = [
 name = "example"
 version = "0.1.0"
 dependencies = [
- "closure-llvm",
+ "closure-ir",
  "inkwell",
 ]
 

@@ -42,7 +42,7 @@ pub(crate) fn lower_field(
 
     Ok(
         quote! {
-            ::closure_llvm::Expr::Field {
+            ::closure_ir::Expr::Field {
                 object:
                     Box::new(#object),
 

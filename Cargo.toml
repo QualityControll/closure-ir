@@ -1,7 +1,7 @@
 [workspace]
 members = [
-    "closure-llvm",
-    "closure-llvm-macro",
+    "closure-ir",
+    "closure-ir-macro",
     "example",
 ]
 

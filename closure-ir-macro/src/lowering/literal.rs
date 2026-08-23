@@ -24,8 +24,8 @@ pub(crate) fn lower_literal(
 
             Ok(
                 quote! {
-                    ::closure_llvm::Expr::Constant(
-                        ::closure_llvm::Value::Bool(
+                    ::closure_ir::Expr::Constant(
+                        ::closure_ir::Value::Bool(
                             #value
                         )
                     )
@@ -50,8 +50,8 @@ pub(crate) fn lower_literal(
 
                         Ok(
                             quote! {
-                                ::closure_llvm::Expr::Constant(
-                                    ::closure_llvm::Value::I32(
+                                ::closure_ir::Expr::Constant(
+                                    ::closure_ir::Value::I32(
                                         #parsed
                                     )
                                 )
@@ -66,8 +66,8 @@ pub(crate) fn lower_literal(
 
                     Ok(
                         quote! {
-                            ::closure_llvm::Expr::Constant(
-                                ::closure_llvm::Value::I8(
+                            ::closure_ir::Expr::Constant(
+                                ::closure_ir::Value::I8(
                                     #parsed
                                 )
                             )
@@ -81,8 +81,8 @@ pub(crate) fn lower_literal(
 
                     Ok(
                         quote! {
-                            ::closure_llvm::Expr::Constant(
-                                ::closure_llvm::Value::I16(
+                            ::closure_ir::Expr::Constant(
+                                ::closure_ir::Value::I16(
                                     #parsed
                                 )
                             )
@@ -96,8 +96,8 @@ pub(crate) fn lower_literal(
 
                     Ok(
                         quote! {
-                            ::closure_llvm::Expr::Constant(
-                                ::closure_llvm::Value::I32(
+                            ::closure_ir::Expr::Constant(
+                                ::closure_ir::Value::I32(
                                     #parsed
                                 )
                             )
@@ -111,8 +111,8 @@ pub(crate) fn lower_literal(
 
                     Ok(
                         quote! {
-                            ::closure_llvm::Expr::Constant(
-                                ::closure_llvm::Value::I64(
+                            ::closure_ir::Expr::Constant(
+                                ::closure_ir::Value::I64(
                                     #parsed
                                 )
                             )
@@ -126,8 +126,8 @@ pub(crate) fn lower_literal(
 
                     Ok(
                         quote! {
-                            ::closure_llvm::Expr::Constant(
-                                ::closure_llvm::Value::I128(
+                            ::closure_ir::Expr::Constant(
+                                ::closure_ir::Value::I128(
                                     #parsed
                                 )
                             )
@@ -141,8 +141,8 @@ pub(crate) fn lower_literal(
 
                     Ok(
                         quote! {
-                            ::closure_llvm::Expr::Constant(
-                                ::closure_llvm::Value::U8(
+                            ::closure_ir::Expr::Constant(
+                                ::closure_ir::Value::U8(
                                     #parsed
                                 )
                             )
@@ -156,8 +156,8 @@ pub(crate) fn lower_literal(
 
                     Ok(
                         quote! {
-                            ::closure_llvm::Expr::Constant(
-                                ::closure_llvm::Value::U16(
+                            ::closure_ir::Expr::Constant(
+                                ::closure_ir::Value::U16(
                                     #parsed
                                 )
                             )
@@ -171,8 +171,8 @@ pub(crate) fn lower_literal(
 
                     Ok(
                         quote! {
-                            ::closure_llvm::Expr::Constant(
-                                ::closure_llvm::Value::U32(
+                            ::closure_ir::Expr::Constant(
+                                ::closure_ir::Value::U32(
                                     #parsed
                                 )
                             )
@@ -186,8 +186,8 @@ pub(crate) fn lower_literal(
 
                     Ok(
                         quote! {
-                            ::closure_llvm::Expr::Constant(
-                                ::closure_llvm::Value::U64(
+                            ::closure_ir::Expr::Constant(
+                                ::closure_ir::Value::U64(
                                     #parsed
                                 )
                             )
@@ -201,8 +201,8 @@ pub(crate) fn lower_literal(
 
                     Ok(
                         quote! {
-                            ::closure_llvm::Expr::Constant(
-                                ::closure_llvm::Value::U128(
+                            ::closure_ir::Expr::Constant(
+                                ::closure_ir::Value::U128(
                                     #parsed
                                 )
                             )
@@ -237,8 +237,8 @@ pub(crate) fn lower_literal(
 
                         Ok(
                             quote! {
-                                ::closure_llvm::Expr::Constant(
-                                    ::closure_llvm::Value::F64(
+                                ::closure_ir::Expr::Constant(
+                                    ::closure_ir::Value::F64(
                                         #parsed
                                     )
                                 )
@@ -253,8 +253,8 @@ pub(crate) fn lower_literal(
 
                     Ok(
                         quote! {
-                            ::closure_llvm::Expr::Constant(
-                                ::closure_llvm::Value::F32(
+                            ::closure_ir::Expr::Constant(
+                                ::closure_ir::Value::F32(
                                     #parsed
                                 )
                             )
@@ -268,8 +268,8 @@ pub(crate) fn lower_literal(
 
                     Ok(
                         quote! {
-                            ::closure_llvm::Expr::Constant(
-                                ::closure_llvm::Value::F64(
+                            ::closure_ir::Expr::Constant(
+                                ::closure_ir::Value::F64(
                                     #parsed
                                 )
                             )
@@ -328,8 +328,8 @@ fn lower_integer_with_type(
 
             Ok(
                 quote! {
-                    ::closure_llvm::Expr::Constant(
-                        ::closure_llvm::Value::I8(#parsed)
+                    ::closure_ir::Expr::Constant(
+                        ::closure_ir::Value::I8(#parsed)
                     )
                 }
             )
@@ -341,8 +341,8 @@ fn lower_integer_with_type(
 
             Ok(
                 quote! {
-                    ::closure_llvm::Expr::Constant(
-                        ::closure_llvm::Value::I16(#parsed)
+                    ::closure_ir::Expr::Constant(
+                        ::closure_ir::Value::I16(#parsed)
                     )
                 }
             )
@@ -354,8 +354,8 @@ fn lower_integer_with_type(
 
             Ok(
                 quote! {
-                    ::closure_llvm::Expr::Constant(
-                        ::closure_llvm::Value::I32(#parsed)
+                    ::closure_ir::Expr::Constant(
+                        ::closure_ir::Value::I32(#parsed)
                     )
                 }
             )
@@ -367,8 +367,8 @@ fn lower_integer_with_type(
 
             Ok(
                 quote! {
-                    ::closure_llvm::Expr::Constant(
-                        ::closure_llvm::Value::I64(#parsed)
+                    ::closure_ir::Expr::Constant(
+                        ::closure_ir::Value::I64(#parsed)
                     )
                 }
             )
@@ -380,8 +380,8 @@ fn lower_integer_with_type(
 
             Ok(
                 quote! {
-                    ::closure_llvm::Expr::Constant(
-                        ::closure_llvm::Value::I128(#parsed)
+                    ::closure_ir::Expr::Constant(
+                        ::closure_ir::Value::I128(#parsed)
                     )
                 }
             )
@@ -393,8 +393,8 @@ fn lower_integer_with_type(
 
             Ok(
                 quote! {
-                    ::closure_llvm::Expr::Constant(
-                        ::closure_llvm::Value::U8(#parsed)
+                    ::closure_ir::Expr::Constant(
+                        ::closure_ir::Value::U8(#parsed)
                     )
                 }
             )
@@ -406,8 +406,8 @@ fn lower_integer_with_type(
 
             Ok(
                 quote! {
-                    ::closure_llvm::Expr::Constant(
-                        ::closure_llvm::Value::U16(#parsed)
+                    ::closure_ir::Expr::Constant(
+                        ::closure_ir::Value::U16(#parsed)
                     )
                 }
             )
@@ -419,8 +419,8 @@ fn lower_integer_with_type(
 
             Ok(
                 quote! {
-                    ::closure_llvm::Expr::Constant(
-                        ::closure_llvm::Value::U32(#parsed)
+                    ::closure_ir::Expr::Constant(
+                        ::closure_ir::Value::U32(#parsed)
                     )
                 }
             )
@@ -432,8 +432,8 @@ fn lower_integer_with_type(
 
             Ok(
                 quote! {
-                    ::closure_llvm::Expr::Constant(
-                        ::closure_llvm::Value::U64(#parsed)
+                    ::closure_ir::Expr::Constant(
+                        ::closure_ir::Value::U64(#parsed)
                     )
                 }
             )
@@ -445,8 +445,8 @@ fn lower_integer_with_type(
 
             Ok(
                 quote! {
-                    ::closure_llvm::Expr::Constant(
-                        ::closure_llvm::Value::U128(#parsed)
+                    ::closure_ir::Expr::Constant(
+                        ::closure_ir::Value::U128(#parsed)
                     )
                 }
             )
@@ -493,8 +493,8 @@ fn lower_float_with_type(
 
             Ok(
                 quote! {
-                    ::closure_llvm::Expr::Constant(
-                        ::closure_llvm::Value::F32(#parsed)
+                    ::closure_ir::Expr::Constant(
+                        ::closure_ir::Value::F32(#parsed)
                     )
                 }
             )
@@ -506,8 +506,8 @@ fn lower_float_with_type(
 
             Ok(
                 quote! {
-                    ::closure_llvm::Expr::Constant(
-                        ::closure_llvm::Value::F64(#parsed)
+                    ::closure_ir::Expr::Constant(
+                        ::closure_ir::Value::F64(#parsed)
                     )
                 }
             )

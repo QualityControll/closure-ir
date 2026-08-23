@@ -91,7 +91,7 @@ fn expand_derive_closure_type(
 
                         Ok(
                             quote! {
-                                ::closure_llvm::FieldInfo {
+                                ::closure_ir::FieldInfo {
                                     name:
                                         stringify!(
                                             #field_name
@@ -100,7 +100,7 @@ fn expand_derive_closure_type(
 
                                     type_info:
                                         <#ty as
-                                            ::closure_llvm::CompileType>
+                                            ::closure_ir::CompileType>
                                             ::type_info(),
                                 }
                             }
@@ -123,14 +123,14 @@ fn expand_derive_closure_type(
 
                         Ok(
                             quote! {
-                                ::closure_llvm::FieldInfo {
+                                ::closure_ir::FieldInfo {
                                     name:
                                         #index_string
                                             .to_string(),
 
                                     type_info:
                                         <#ty as
-                                            ::closure_llvm::CompileType>
+                                            ::closure_ir::CompileType>
                                             ::type_info(),
                                 }
                             }
@@ -160,7 +160,7 @@ fn expand_derive_closure_type(
 
                         quote! {
                             <#ty as
-                                ::closure_llvm::CompileType>
+                                ::closure_ir::CompileType>
                                 ::llvm_type(context)
                         }
                     })
@@ -177,7 +177,7 @@ fn expand_derive_closure_type(
 
                         quote! {
                             <#ty as
-                                ::closure_llvm::CompileType>
+                                ::closure_ir::CompileType>
                                 ::llvm_type(context)
                         }
                     })
@@ -191,13 +191,13 @@ fn expand_derive_closure_type(
 
     Ok(
         quote! {
-            impl ::closure_llvm::CompileType
+            impl ::closure_ir::CompileType
                 for #name
             {
                 fn type_info()
-                    -> ::closure_llvm::TypeInfo
+                    -> ::closure_ir::TypeInfo
                 {
-                    ::closure_llvm::TypeInfo::Struct {
+                    ::closure_ir::TypeInfo::Struct {
                         name:
                             stringify!(
                                 #name
