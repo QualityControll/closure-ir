@@ -42,9 +42,7 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
                 if let syn::Expr::While(while_expr) = expr {
                     let condition = lower_expr(&while_expr.cond, arguments, &current_locals, Some(&syn::parse_quote!(bool)))?;
                     let body = lower_block(&while_expr.body, arguments, &current_locals, None)?;
-                    statement_tokens.push(quote! {
-                        ::closure_llvm::Statement::While { condition: #condition, body: #body }
-                    });
+                    statement_tokens.push(quote! { ::closure_llvm::Statement::While { condition: #condition, body: #body } });
                     continue;
                 }
                 if let syn::Expr::ForLoop(for_expr) = expr {
@@ -66,9 +64,9 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
                     let local_index = current_locals.len();
                     let type_info = quote! { <#local_type as ::closure_llvm::CompileType>::type_info() };
                     let mut body_locals = current_locals.clone();
-                    body_locals.push(LocalVariable { name, index: local_index, type_info: Some(local_type.clone()), mutable: false });
+                    body_locals.push(LocalVariable { name: name.clone(), index: local_index, type_info: Some(local_type.clone()), mutable: false });
                     let body = lower_block(&for_expr.body, arguments, &body_locals, None)?;
-                    let inclusive = range.limits == syn::RangeLimits::Closed(syn::token::DotDotEq::default());
+                    let inclusive = matches!(range.limits, syn::RangeLimits::Closed(_));
                     statement_tokens.push(quote! {
                         ::closure_llvm::Statement::For {
                             local: #local_index,
@@ -79,7 +77,7 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
                             body: #body,
                         }
                     });
-                    current_locals.push(LocalVariable { name: syn::Ident::new("__for_unused", proc_macro2::Span::call_site()), index: local_index, type_info: Some(local_type), mutable: false });
+                    current_locals.push(LocalVariable { name, index: local_index, type_info: Some(local_type), mutable: false });
                     continue;
                 }
                 if let syn::Expr::Assign(assign) = expr {
@@ -106,9 +104,7 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
         None => quote! { None },
     };
 
-    Ok(quote! {
-        ::closure_llvm::Block { statements: vec![#(#statement_tokens),*], result: #result_tokens }
-    })
+    Ok(quote! { ::closure_llvm::Block { statements: vec![#(#statement_tokens),*], result: #result_tokens } })
 }
 
 fn assignment_target<'a>(assign: &ExprAssign, locals: &'a [LocalVariable]) -> syn::Result<(usize, Option<&'a Type>)> {
