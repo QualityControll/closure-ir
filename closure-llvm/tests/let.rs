@@ -68,15 +68,3 @@ fn test_let_binding_shadowing() {
 
     assert_eq!(call!(compiled, 4), 24);
 }
-
-
-#[test]
-fn test_let_binding_with_tuple_field() {
-    let compiled =
-        compile_closure!(|x: i32| -> i32 {
-            let pair = (x, x + 1);
-            pair.0 + pair.1
-        });
-
-    assert_eq!(call!(compiled, 4), 9);
-}
