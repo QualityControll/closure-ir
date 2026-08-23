@@ -1,12 +1,14 @@
 use crate::types::TypeInfo;
 use crate::value::Value;
 
+use serde::{Serialize, Deserialize};
+
 
 // ============================================================
 // Expression IR
 // ============================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Argument(usize),
 
@@ -131,7 +133,7 @@ pub enum Expr {
 // Closure description
 // ============================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Closure {
     pub arguments: Vec<TypeInfo>,
     pub return_type: TypeInfo,

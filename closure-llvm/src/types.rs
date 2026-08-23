@@ -3,12 +3,14 @@ use inkwell::{
     types::BasicTypeEnum,
 };
 
+use serde::{Serialize, Deserialize};
+
 
 // ============================================================
 // Type information
 // ============================================================
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TypeInfo {
     F32,
     F64,
@@ -78,7 +80,7 @@ impl TypeInfo {
 }
 
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldInfo {
     pub name: String,
     pub type_info: TypeInfo,

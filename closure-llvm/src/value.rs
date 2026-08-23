@@ -1,8 +1,11 @@
+
+use serde::{Serialize, Deserialize};
+
 // ============================================================
 // Runtime values
 // ============================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Value {
     F32(f32),
     F64(f64),
