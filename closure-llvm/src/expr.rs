@@ -1,7 +1,7 @@
 use crate::types::TypeInfo;
 use crate::value::Value;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 
 // ============================================================
@@ -20,29 +20,25 @@ pub enum Expr {
     },
 
     Tuple {
-        elements: Vec<Expr>
+        elements: Vec<Expr>,
     },
 
     Add {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-
     Sub {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-
     Mul {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-
     Div {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-
     Rem {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
@@ -52,27 +48,22 @@ pub enum Expr {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-
     Ne {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-
     Lt {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-
     Le {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-
     Gt {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-
     Ge {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
@@ -82,32 +73,26 @@ pub enum Expr {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-
     Or {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-
     BitAnd {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-
     BitOr {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-
     BitXor {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-
     Shl {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-
     Shr {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
@@ -116,7 +101,6 @@ pub enum Expr {
     Not {
         operand: Box<Expr>,
     },
-
     Neg {
         operand: Box<Expr>,
     },
@@ -130,6 +114,45 @@ pub enum Expr {
 
 
 // ============================================================
+// Statement IR
+// ============================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum Statement {
+    Let {
+        local: usize,
+        value: Expr,
+        mutable: bool,
+    },
+
+    Assign {
+        local: usize,
+        value: Expr,
+    },
+}
+
+
+// ============================================================
+// Block IR
+// ============================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Block {
+    pub statements: Vec<Statement>,
+    pub result: Expr,
+}
+
+impl Block {
+    pub fn expression(result: Expr) -> Self {
+        Self {
+            statements: Vec::new(),
+            result,
+        }
+    }
+}
+
+
+// ============================================================
 // Closure description
 // ============================================================
 
@@ -137,5 +160,5 @@ pub enum Expr {
 pub struct Closure {
     pub arguments: Vec<TypeInfo>,
     pub return_type: TypeInfo,
-    pub body: Expr,
+    pub body: Block,
 }
