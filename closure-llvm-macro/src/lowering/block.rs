@@ -1,23 +1,9 @@
 use proc_macro2::TokenStream;
 
-use syn::{
-    ExprAssign,
-    Pat,
-    Stmt,
-    Type,
-};
+use syn::{ExprAssign, Pat, Stmt, Type};
 
-use crate::lowering::expression::{
-    expression_type,
-    lower_expr,
-    LocalVariable,
-};
+use crate::lowering::expression::{expression_type, lower_expr, LocalVariable};
 use crate::parser::ClosureArgument;
-
-
-// ============================================================
-// Block
-// ============================================================
 
 pub(crate) fn lower_block(
     block: &syn::Block,
@@ -25,14 +11,8 @@ pub(crate) fn lower_block(
     locals: &[LocalVariable],
     expected_type: Option<&Type>,
 ) -> syn::Result<TokenStream> {
-    lower_stmts(
-        &block.stmts,
-        arguments,
-        locals,
-        expected_type,
-    )
+    lower_stmts(&block.stmts, arguments, locals, expected_type)
 }
-
 
 fn lower_stmts(
     statements: &[Stmt],
@@ -40,215 +20,148 @@ fn lower_stmts(
     locals: &[LocalVariable],
     expected_type: Option<&Type>,
 ) -> syn::Result<TokenStream> {
-    let statement =
-        statements
-            .first()
-            .ok_or_else(|| {
-                syn::Error::new(
-                    proc_macro2::Span::call_site(),
-                    "compiled closure blocks cannot be empty",
-                )
-            })?;
+    let statement = statements.first().ok_or_else(|| {
+        syn::Error::new(proc_macro2::Span::call_site(), "compiled closure blocks cannot be empty")
+    })?;
 
     match statement {
         Stmt::Local(local) => {
-            let (name, mutable, explicit_type) =
-                match &local.pat {
-                    Pat::Ident(pattern) =>
-                        (
+            let (name, mutable, explicit_type) = match &local.pat {
+                Pat::Ident(pattern) => (pattern.ident.clone(), pattern.mutability.is_some(), None),
+                Pat::Type(pattern) => {
+                    let explicit_type = (*pattern.ty).clone();
+                    match &*pattern.pat {
+                        Pat::Ident(pattern) => (
                             pattern.ident.clone(),
                             pattern.mutability.is_some(),
-                            None,
+                            Some(explicit_type),
                         ),
-
-                    Pat::Type(pattern) => {
-                        let explicit_type =
-                            (*pattern.ty).clone();
-
-                        match &*pattern.pat {
-                            Pat::Ident(pattern) =>
-                                (
-                                    pattern.ident.clone(),
-                                    pattern.mutability.is_some(),
-                                    Some(explicit_type),
-                                ),
-
-                            _ =>
-                                return Err(
-                                    syn::Error::new_spanned(
-                                        &pattern.pat,
-                                        "let bindings must use identifiers",
-                                    )
-                                ),
-                        }
+                        _ => return Err(syn::Error::new_spanned(
+                            &pattern.pat,
+                            "let bindings must use identifiers",
+                        )),
                     }
-
-                    _ =>
-                        return Err(
-                            syn::Error::new_spanned(
-                                &local.pat,
-                                "let bindings must use identifiers",
-                            )
-                        ),
-                };
-
-            let initializer =
-                local
-                    .init
-                    .as_ref()
-                    .ok_or_else(|| {
-                        syn::Error::new_spanned(
-                            local,
-                            "let bindings require an initializer",
-                        )
-                    })?;
-
-            let local_type =
-                explicit_type
-                    .or_else(|| {
-                        expression_type(
-                            &initializer.expr,
-                            arguments,
-                            locals,
-                        )
-                    });
-
-            let value =
-                lower_expr(
-                    &initializer.expr,
-                    arguments,
-                    locals,
-                    local_type.as_ref(),
-                )?;
-
-            let mut next_locals =
-                locals.to_vec();
-
-            next_locals.push(
-                LocalVariable {
-                    name,
-                    value,
-                    type_info: local_type,
-                    mutable,
                 }
-            );
+                _ => return Err(syn::Error::new_spanned(
+                    &local.pat,
+                    "let bindings must use identifiers",
+                )),
+            };
 
-            lower_stmts(
-                &statements[1..],
+            let initializer = local.init.as_ref().ok_or_else(|| {
+                syn::Error::new_spanned(local, "let bindings require an initializer")
+            })?;
+
+            let local_type = explicit_type.or_else(|| {
+                expression_type(&initializer.expr, arguments, locals)
+            });
+
+            let value = lower_expr(
+                &initializer.expr,
                 arguments,
-                &next_locals,
-                expected_type,
-            )
+                locals,
+                local_type.as_ref(),
+            )?;
+
+            let mut next_locals = locals.to_vec();
+            next_locals.push(LocalVariable {
+                name,
+                value,
+                type_info: local_type,
+                mutable,
+            });
+
+            lower_stmts(&statements[1..], arguments, &next_locals, expected_type)
         }
 
         Stmt::Expr(expr, _) => {
-            if statements.len() == 1 {
-                return lower_expr(
-                    expr,
+            if let syn::Expr::While(while_expr) = expr {
+                let condition = lower_expr(
+                    &while_expr.cond,
                     arguments,
                     locals,
-                    expected_type,
-                );
+                    Some(&syn::parse_quote!(bool)),
+                )?;
+
+                let body = lower_block(
+                    &while_expr.body,
+                    arguments,
+                    locals,
+                    None,
+                )?;
+
+                let while_tokens = quote::quote! {
+                    ::closure_llvm::Statement::While {
+                        condition: #condition,
+                        body: ::closure_llvm::Block::expression(#body),
+                    }
+                };
+
+                if statements.len() == 1 {
+                    return Err(syn::Error::new_spanned(
+                        expr,
+                        "while loops require a following result expression",
+                    ));
+                }
+
+                let rest = lower_stmts(&statements[1..], arguments, locals, expected_type)?;
+                return Ok(quote::quote! {{ #while_tokens; #rest } });
+            }
+
+            if statements.len() == 1 {
+                return lower_expr(expr, arguments, locals, expected_type);
             }
 
             if let syn::Expr::Assign(assign) = expr {
-                let next_locals =
-                    lower_assignment(
-                        assign,
-                        arguments,
-                        locals,
-                    )?;
-
-                return lower_stmts(
-                    &statements[1..],
-                    arguments,
-                    &next_locals,
-                    expected_type,
-                );
+                let next_locals = lower_assignment(assign, arguments, locals)?;
+                return lower_stmts(&statements[1..], arguments, &next_locals, expected_type);
             }
 
-            Err(
-                syn::Error::new_spanned(
-                    &statements[1],
-                    "only let bindings and assignments may precede the final expression",
-                )
-            )
+            Err(syn::Error::new_spanned(
+                &statements[1],
+                "only let bindings, assignments, and while loops may precede the final expression",
+            ))
         }
 
-        other =>
-            Err(
-                syn::Error::new_spanned(
-                    other,
-                    "only let bindings, assignments, and a final expression are supported",
-                )
-            ),
+        other => Err(syn::Error::new_spanned(
+            other,
+            "only let bindings, assignments, while loops, and a final expression are supported",
+        )),
     }
 }
-
 
 fn lower_assignment(
     assign: &ExprAssign,
     arguments: &[ClosureArgument],
     locals: &[LocalVariable],
 ) -> syn::Result<Vec<LocalVariable>> {
-    let name =
-        match &*assign.left {
-            syn::Expr::Path(path)
-                if path.path.segments.len() == 1 =>
-            {
-                path.path.segments[0].ident.clone()
-            }
+    let name = match &*assign.left {
+        syn::Expr::Path(path) if path.path.segments.len() == 1 => {
+            path.path.segments[0].ident.clone()
+        }
+        _ => return Err(syn::Error::new_spanned(
+            &assign.left,
+            "assignment targets must be local variables",
+        )),
+    };
 
-            _ =>
-                return Err(
-                    syn::Error::new_spanned(
-                        &assign.left,
-                        "assignment targets must be local variables",
-                    )
-                ),
-        };
-
-    let index =
-        locals
-            .iter()
-            .rposition(|local| &local.name == &name)
-            .ok_or_else(|| {
-                syn::Error::new_spanned(
-                    &assign.left,
-                    format!(
-                        "unknown local variable `{}`",
-                        name
-                    ),
-                )
-            })?;
+    let index = locals.iter().rposition(|local| &local.name == &name).ok_or_else(|| {
+        syn::Error::new_spanned(
+            &assign.left,
+            format!("unknown local variable `{}`", name),
+        )
+    })?;
 
     if !locals[index].mutable {
-        return Err(
-            syn::Error::new_spanned(
-                &assign.left,
-                format!(
-                    "cannot assign to immutable variable `{}`",
-                    name
-                ),
-            )
-        );
+        return Err(syn::Error::new_spanned(
+            &assign.left,
+            format!("cannot assign to immutable variable `{}`", name),
+        ));
     }
 
-    let expected_type =
-        locals[index].type_info.as_ref();
-
-    let value =
-        lower_expr(
-            &assign.right,
-            arguments,
-            locals,
-            expected_type,
-        )?;
-
-    let mut next_locals =
-        locals.to_vec();
-
+    let expected_type = locals[index].type_info.as_ref();
+    let value = lower_expr(&assign.right, arguments, locals, expected_type)?;
+    let mut next_locals = locals.to_vec();
     next_locals[index].value = value;
-
     Ok(next_locals)
 }
