@@ -1,5 +1,5 @@
 use inkwell::{builder::Builder, context::Context, values::{BasicValueEnum, FunctionValue, PointerValue}};
-use crate::{compiler::llvm_type, expr::{Block, Expr, Statement}, lowering::{LoweredValue, Lowering}, types::TypeInfo};
+use crate::{compiler::llvm_type, expr::{Block, Statement}, lowering::{LoweredValue, Lowering}, types::TypeInfo};
 
 pub(crate) fn lower_closure_block<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: FunctionValue<'ctx>, arguments: &[PointerValue<'ctx>], argument_types: &[TypeInfo], return_type: &TypeInfo, block: &Block) -> Result<BasicValueEnum<'ctx>, String> {
     let lowering = Lowering;
@@ -23,8 +23,7 @@ fn lower_block<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: 
                 let value = lowering.lower_expr(context, builder, function, &pointers, &types, type_info, value)?;
                 let value = lowering.materialize_value(context, builder, value)?;
                 builder.build_store(pointer, value).map_err(|error| format!("failed to initialize local {}: {:?}", local, error))?;
-                pointers.push(pointer);
-                types.push(type_info.clone());
+                pointers.push(pointer); types.push(type_info.clone());
             }
             Statement::Assign { local, value } => {
                 let index = argument_count + local;
@@ -34,78 +33,60 @@ fn lower_block<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: 
                 let value = lowering.materialize_value(context, builder, value)?;
                 builder.build_store(pointer, value).map_err(|error| format!("failed to assign local {}: {:?}", local, error))?;
             }
-            Statement::While { condition, body } => lower_while(context, builder, function, &lowering, &pointers, &types, argument_count, condition, body)?,
-            Statement::For { local, type_info, start, end, inclusive, body } => lower_for(context, builder, function, &lowering, &pointers, &types, argument_count, *local, type_info, start, end, *inclusive, body)?,
+            Statement::While { condition, body } => {
+                let condition_block = context.append_basic_block(function, "while_condition");
+                let body_block = context.append_basic_block(function, "while_body");
+                let exit_block = context.append_basic_block(function, "while_exit");
+                builder.build_unconditional_branch(condition_block).map_err(|error| format!("failed to enter while loop: {:?}", error))?;
+                builder.position_at_end(condition_block);
+                let condition = lowering.lower_expr(context, builder, function, &pointers, &types, &TypeInfo::Bool, condition)?;
+                let condition = lowering.materialize_value(context, builder, condition)?;
+                let condition = match condition { BasicValueEnum::IntValue(value) if value.get_type().get_bit_width() == 1 => value, _ => return Err("while condition must be bool".to_string()) };
+                builder.build_conditional_branch(condition, body_block, exit_block).map_err(|error| format!("failed to build while branch: {:?}", error))?;
+                builder.position_at_end(body_block);
+                let _ = lower_block(context, builder, function, &pointers, &types, argument_count, body, None)?;
+                let body_end = builder.get_insert_block().ok_or_else(|| "missing while body block".to_string())?;
+                if body_end.get_terminator().is_none() { builder.build_unconditional_branch(condition_block).map_err(|error| format!("failed to loop back to condition: {:?}", error))?; }
+                builder.position_at_end(exit_block);
+            }
+            Statement::For { local, type_info, start, end, inclusive, body } => {
+                let pointer = builder.build_alloca(llvm_type(context, type_info)?, &format!("for_local_{}", local)).map_err(|error| format!("failed to allocate for local {}: {:?}", local, error))?;
+                let start = lowering.lower_expr(context, builder, function, &pointers, &types, type_info, start)?;
+                let start = lowering.materialize_value(context, builder, start)?;
+                builder.build_store(pointer, start).map_err(|error| format!("failed to initialize for local {}: {:?}", local, error))?;
+                let mut loop_pointers = pointers.clone(); let mut loop_types = types.clone(); loop_pointers.push(pointer); loop_types.push(type_info.clone());
+                let condition_block = context.append_basic_block(function, "for_condition");
+                let body_block = context.append_basic_block(function, "for_body");
+                let increment_block = context.append_basic_block(function, "for_increment");
+                let exit_block = context.append_basic_block(function, "for_exit");
+                builder.build_unconditional_branch(condition_block).map_err(|error| format!("failed to enter for loop: {:?}", error))?;
+                builder.position_at_end(condition_block);
+                let current = builder.build_load(llvm_type(context, type_info)?, pointer, "for_current").map_err(|error| format!("failed to load for local {}: {:?}", local, error))?;
+                let end_value = lowering.lower_expr(context, builder, function, &pointers, &types, type_info, end)?;
+                let end_value = lowering.materialize_value(context, builder, end_value)?;
+                let condition = match (current, end_value) {
+                    (BasicValueEnum::IntValue(current), BasicValueEnum::IntValue(end_value)) => { let predicate = if type_info.is_unsigned_integer() { if *inclusive { inkwell::IntPredicate::ULE } else { inkwell::IntPredicate::ULT } } else { if *inclusive { inkwell::IntPredicate::SLE } else { inkwell::IntPredicate::SLT } }; builder.build_int_compare(predicate, current, end_value, "for_cmp") }
+                    (BasicValueEnum::FloatValue(current), BasicValueEnum::FloatValue(end_value)) => { let predicate = if *inclusive { inkwell::FloatPredicate::OLE } else { inkwell::FloatPredicate::OLT }; builder.build_float_compare(predicate, current, end_value, "for_cmp") }
+                    _ => return Err("for range bounds must have matching numeric types".to_string()),
+                }.map_err(|error| format!("failed to compare for bounds: {:?}", error))?;
+                builder.build_conditional_branch(condition, body_block, exit_block).map_err(|error| format!("failed to branch for loop: {:?}", error))?;
+                builder.position_at_end(body_block);
+                let _ = lower_block(context, builder, function, &loop_pointers, &loop_types, argument_count, body, None)?;
+                let body_end = builder.get_insert_block().ok_or_else(|| "missing for body block".to_string())?;
+                if body_end.get_terminator().is_none() { builder.build_unconditional_branch(increment_block).map_err(|error| format!("failed to enter for increment: {:?}", error))?; }
+                builder.position_at_end(increment_block);
+                let current = builder.build_load(llvm_type(context, type_info)?, pointer, "for_increment_value").map_err(|error| format!("failed to load for increment value: {:?}", error))?;
+                let next = match current {
+                    BasicValueEnum::IntValue(current) => { let one = current.get_type().const_int(1, false); builder.build_int_add(current, one, "for_next").map(Into::into) }
+                    BasicValueEnum::FloatValue(current) => { let one = current.get_type().const_float(1.0); builder.build_float_add(current, one, "for_next").map(Into::into) }
+                    _ => return Err("for loops require numeric range types".to_string()),
+                }.map_err(|error| format!("failed to increment for loop: {:?}", error))?;
+                builder.build_store(pointer, next).map_err(|error| format!("failed to store for increment: {:?}", error))?;
+                builder.build_unconditional_branch(condition_block).map_err(|error| format!("failed to loop back for condition: {:?}", error))?;
+                builder.position_at_end(exit_block);
+            }
         }
     }
-    let result = match (&block.result, expected_result_type) {
-        (Some(expr), Some(type_info)) => Some(lowering.lower_expr(context, builder, function, &pointers, &types, type_info, expr)?),
-        (Some(_), None) => return Err("block result has no expected type".to_string()),
-        (None, Some(_)) => return Err("closure block has no result expression".to_string()),
-        (None, None) => None,
-    };
+    let result = match (&block.result, expected_result_type) { (Some(expr), Some(type_info)) => Some(lowering.lower_expr(context, builder, function, &pointers, &types, type_info, expr)?), (Some(_), None) => return Err("block result has no expected type".to_string()), (None, Some(_)) => return Err("closure block has no result expression".to_string()), (None, None) => None };
     Ok((pointers, types, result))
-}
-
-fn lower_while<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: FunctionValue<'ctx>, lowering: &Lowering, pointers: &[PointerValue<'ctx>], types: &[TypeInfo], argument_count: usize, condition: &Expr, body: &Block) -> Result<(), String> {
-    let condition_block = context.append_basic_block(function, "while_condition");
-    let body_block = context.append_basic_block(function, "while_body");
-    let exit_block = context.append_basic_block(function, "while_exit");
-    builder.build_unconditional_branch(condition_block).map_err(|error| format!("failed to enter while loop: {:?}", error))?;
-    builder.position_at_end(condition_block);
-    let condition = lowering.lower_expr(context, builder, function, pointers, types, &TypeInfo::Bool, condition)?;
-    let condition = lowering.materialize_value(context, builder, condition)?;
-    let condition = match condition { BasicValueEnum::IntValue(value) if value.get_type().get_bit_width() == 1 => value, _ => return Err("while condition must be bool".to_string()) };
-    builder.build_conditional_branch(condition, body_block, exit_block).map_err(|error| format!("failed to build while branch: {:?}", error))?;
-    builder.position_at_end(body_block);
-    let _ = lower_block(context, builder, function, pointers, types, argument_count, body, None)?;
-    let body_end = builder.get_insert_block().ok_or_else(|| "missing while body block".to_string())?;
-    if body_end.get_terminator().is_none() { builder.build_unconditional_branch(condition_block).map_err(|error| format!("failed to loop back to condition: {:?}", error))?; }
-    builder.position_at_end(exit_block);
-    Ok(())
-}
-
-fn lower_for<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: FunctionValue<'ctx>, lowering: &Lowering, pointers: &[PointerValue<'ctx>], types: &[TypeInfo], argument_count: usize, local: usize, type_info: &TypeInfo, start: &Expr, end: &Expr, inclusive: bool, body: &Block) -> Result<(), String> {
-    if !type_info.is_numeric() || type_info.is_bool() { return Err("for loops require numeric range types".to_string()); }
-    let pointer = builder.build_alloca(llvm_type(context, type_info)?, &format!("for_local_{}", local)).map_err(|error| format!("failed to allocate for local {}: {:?}", local, error))?;
-    let start = lowering.lower_expr(context, builder, function, pointers, types, type_info, start)?;
-    let start = lowering.materialize_value(context, builder, start)?;
-    builder.build_store(pointer, start).map_err(|error| format!("failed to initialize for local {}: {:?}", local, error))?;
-    let mut loop_pointers = pointers.to_vec();
-    let mut loop_types = types.to_vec();
-    loop_pointers.push(pointer);
-    loop_types.push(type_info.clone());
-    let condition_block = context.append_basic_block(function, "for_condition");
-    let body_block = context.append_basic_block(function, "for_body");
-    let increment_block = context.append_basic_block(function, "for_increment");
-    let exit_block = context.append_basic_block(function, "for_exit");
-    builder.build_unconditional_branch(condition_block).map_err(|error| format!("failed to enter for loop: {:?}", error))?;
-    builder.position_at_end(condition_block);
-    let current = builder.build_load(llvm_type(context, type_info)?, pointer, "for_current").map_err(|error| format!("failed to load for local {}: {:?}", local, error))?;
-    let end_value = lowering.lower_expr(context, builder, function, pointers, types, type_info, end)?;
-    let end_value = lowering.materialize_value(context, builder, end_value)?;
-    let condition = match (current, end_value) {
-        (BasicValueEnum::IntValue(current), BasicValueEnum::IntValue(end_value)) => {
-            let predicate = if type_info.is_unsigned_integer() { if inclusive { inkwell::IntPredicate::ULE } else { inkwell::IntPredicate::ULT } } else { if inclusive { inkwell::IntPredicate::SLE } else { inkwell::IntPredicate::SLT } };
-            builder.build_int_compare(predicate, current, end_value, "for_cmp")
-        }
-        (BasicValueEnum::FloatValue(current), BasicValueEnum::FloatValue(end_value)) => {
-            let predicate = if inclusive { inkwell::FloatPredicate::OLE } else { inkwell::FloatPredicate::OLT };
-            builder.build_float_compare(predicate, current, end_value, "for_cmp")
-        }
-        _ => return Err("for range bounds must have matching numeric types".to_string()),
-    }.map_err(|error| format!("failed to compare for bounds: {:?}", error))?;
-    builder.build_conditional_branch(condition, body_block, exit_block).map_err(|error| format!("failed to branch for loop: {:?}", error))?;
-    builder.position_at_end(body_block);
-    let _ = lower_block(context, builder, function, &loop_pointers, &loop_types, argument_count, body, None)?;
-    let body_end = builder.get_insert_block().ok_or_else(|| "missing for body block".to_string())?;
-    if body_end.get_terminator().is_none() { builder.build_unconditional_branch(increment_block).map_err(|error| format!("failed to enter for increment: {:?}", error))?; }
-    builder.position_at_end(increment_block);
-    let current = builder.build_load(llvm_type(context, type_info)?, pointer, "for_increment_value").map_err(|error| format!("failed to load for increment value: {:?}", error))?;
-    let one = match llvm_type(context, type_info)? { inkwell::types::BasicTypeEnum::IntType(ty) => ty.const_int(1, false).into(), inkwell::types::BasicTypeEnum::FloatType(ty) => ty.const_float(1.0).into(), _ => return Err("for loops require numeric range types".to_string()) };
-    let next = match (current, one) { (BasicValueEnum::IntValue(current), BasicValueEnum::IntValue(one)) => builder.build_int_add(current, one, "for_next").map(Into::into), (BasicValueEnum::FloatValue(current), BasicValueEnum::FloatValue(one)) => builder.build_float_add(current, one, "for_next").map(Into::into), _ => return Err("for loop increment type mismatch".to_string()) }.map_err(|error| format!("failed to increment for loop: {:?}", error))?;
-    builder.build_store(pointer, next).map_err(|error| format!("failed to store for increment: {:?}", error))?;
-    builder.build_unconditional_branch(condition_block).map_err(|error| format!("failed to loop back for condition: {:?}", error))?;
-    builder.position_at_end(exit_block);
-    Ok(())
 }
