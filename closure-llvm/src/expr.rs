@@ -37,6 +37,7 @@ pub enum Statement {
     Let { local: usize, type_info: TypeInfo, value: Expr, mutable: bool },
     Assign { local: usize, value: Expr },
     While { condition: Expr, body: Block },
+    For { local: usize, type_info: TypeInfo, start: Expr, end: Expr, inclusive: bool, body: Block },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
