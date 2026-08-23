@@ -7,6 +7,7 @@ use syn::{
 };
 
 use crate::lowering::expression::{
+    expression_type,
     lower_expr,
     LocalVariable,
 };
@@ -92,10 +93,14 @@ fn lower_stmts(
             let local_type =
                 match &local.pat {
                     Pat::Type(pattern) =>
-                        Some(&*pattern.ty),
+                        Some((*pattern.ty).clone()),
 
                     _ =>
-                        None,
+                        expression_type(
+                            &initializer.expr,
+                            arguments,
+                            locals,
+                        ),
                 };
 
             let value =
@@ -103,7 +108,7 @@ fn lower_stmts(
                     &initializer.expr,
                     arguments,
                     locals,
-                    local_type,
+                    local_type.as_ref(),
                 )?;
 
             let mut next_locals =
@@ -113,6 +118,7 @@ fn lower_stmts(
                 LocalVariable {
                     name,
                     value,
+                    type_info: local_type,
                 }
             );
 
