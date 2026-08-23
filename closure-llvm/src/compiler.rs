@@ -44,11 +44,9 @@ impl<'ctx> Compiler<'ctx> {
 
     // ========================================================
     // Typed compilation
-    //
-    // Used by compile_closure! and the statically typed API.
     // ========================================================
 
-    pub fn compile_typed<Args, Ret>(
+    pub fn compile<Args, Ret>(
         &self,
         closure: &Closure,
     ) -> Result<
@@ -62,16 +60,13 @@ impl<'ctx> Compiler<'ctx> {
         let context =
             self.context;
 
-
         let module =
             context.create_module(
                 "closure_module"
             );
 
-
         let function_name =
             "compiled_closure";
-
 
         self.generate_function(
             context,
@@ -80,14 +75,12 @@ impl<'ctx> Compiler<'ctx> {
             closure,
         )?;
 
-
         println!(
             "Generated LLVM IR:\n{}",
             module
                 .print_to_string()
                 .to_string()
         );
-
 
         let engine =
             module
@@ -100,7 +93,6 @@ impl<'ctx> Compiler<'ctx> {
                         error
                     )
                 })?;
-
 
         Ok(
             CompiledClosure::new(
@@ -113,20 +105,9 @@ impl<'ctx> Compiler<'ctx> {
 
     // ========================================================
     // Dynamic compilation
-    //
-    // Used when a Closure has been deserialized and therefore
-    // the Rust generic argument/return types are not available.
-    //
-    // The Closure itself contains:
-    //
-    //     arguments
-    //     return_type
-    //     body
-    //
-    // which is sufficient to generate the LLVM function.
     // ========================================================
 
-    pub fn compile(
+    pub fn compile_dynamic(
         &self,
         closure: &Closure,
     ) -> Result<
@@ -136,32 +117,27 @@ impl<'ctx> Compiler<'ctx> {
         let context =
             self.context;
 
-
         let module =
             context.create_module(
-                "closure_module"
+                "dynamic_closure_module"
             );
 
-
         let function_name =
-            "compiled_closure";
+            "compiled_dynamic_closure";
 
-
-        self.generate_function(
+        self.generate_dynamic_function(
             context,
             &module,
             function_name,
             closure,
         )?;
 
-
         println!(
-            "Generated LLVM IR:\n{}",
+            "Generated dynamic LLVM IR:\n{}",
             module
                 .print_to_string()
                 .to_string()
         );
-
 
         let engine =
             module
@@ -174,7 +150,6 @@ impl<'ctx> Compiler<'ctx> {
                         error
                     )
                 })?;
-
 
         Ok(
             DynamicCompiledClosure::new(
@@ -188,7 +163,7 @@ impl<'ctx> Compiler<'ctx> {
 
 
     // ========================================================
-    // Function generation
+    // Typed function generation
     // ========================================================
 
     fn generate_function(
@@ -203,24 +178,10 @@ impl<'ctx> Compiler<'ctx> {
                 AddressSpace::default(),
             );
 
-
         let result_pointer_type =
             context.ptr_type(
                 AddressSpace::default(),
             );
-
-
-        // ----------------------------------------------------
-        // IMPORTANT:
-        //
-        // The function now returns void and receives the result
-        // as a pointer.
-        //
-        //     void compiled_closure(
-        //         ptr args,
-        //         ptr result
-        //     )
-        // ----------------------------------------------------
 
         let function_type =
             context
@@ -233,7 +194,6 @@ impl<'ctx> Compiler<'ctx> {
                     false,
                 );
 
-
         let function =
             module.add_function(
                 function_name,
@@ -241,26 +201,18 @@ impl<'ctx> Compiler<'ctx> {
                 None,
             );
 
-
         let entry =
             context.append_basic_block(
                 function,
                 "entry",
             );
 
-
         let builder =
             context.create_builder();
-
 
         builder.position_at_end(
             entry
         );
-
-
-        // ====================================================
-        // Arguments pointer
-        // ====================================================
 
         let argument_pointer =
             function
@@ -271,11 +223,6 @@ impl<'ctx> Compiler<'ctx> {
                 })?
                 .into_pointer_value();
 
-
-        // ====================================================
-        // Result pointer
-        // ====================================================
-
         let result_pointer =
             function
                 .get_nth_param(1)
@@ -285,11 +232,6 @@ impl<'ctx> Compiler<'ctx> {
                 })?
                 .into_pointer_value();
 
-
-        // ====================================================
-        // Build argument pointers
-        // ====================================================
-
         let arguments =
             self.build_argument_pointers(
                 context,
@@ -298,14 +240,8 @@ impl<'ctx> Compiler<'ctx> {
                 &closure.arguments,
             )?;
 
-
-        // ====================================================
-        // Lower expression
-        // ====================================================
-
         let lowering =
             Lowering;
-
 
         let value =
             lowering.lower_expr(
@@ -318,18 +254,12 @@ impl<'ctx> Compiler<'ctx> {
                 &closure.body,
             )?;
 
-
         let value =
             lowering.materialize_value(
                 context,
                 &builder,
                 value,
             )?;
-
-
-        // ====================================================
-        // Store result
-        // ====================================================
 
         builder
             .build_store(
@@ -343,11 +273,6 @@ impl<'ctx> Compiler<'ctx> {
                 )
             })?;
 
-
-        // ====================================================
-        // Return void
-        // ====================================================
-
         builder
             .build_return(None)
             .map_err(|error| {
@@ -356,7 +281,6 @@ impl<'ctx> Compiler<'ctx> {
                     error
                 )
             })?;
-
 
         if function.verify(true) {
             Ok(())
@@ -370,7 +294,148 @@ impl<'ctx> Compiler<'ctx> {
 
 
     // ========================================================
-    // Argument pointers
+    // Dynamic function generation
+    //
+    // LLVM ABI:
+    //
+    //     void compiled_dynamic_closure(
+    //         ptr args,
+    //         ptr result
+    //     )
+    //
+    // where `args` is an array of pointers:
+    //
+    //     args[0] -> argument 0
+    //     args[1] -> argument 1
+    //     ...
+    //
+    // This avoids depending on Rust tuple layout.
+    // ========================================================
+
+    fn generate_dynamic_function(
+        &self,
+        context: &'ctx Context,
+        module: &Module<'ctx>,
+        function_name: &str,
+        closure: &Closure,
+    ) -> Result<(), String> {
+        let pointer_type =
+            context.ptr_type(
+                AddressSpace::default(),
+            );
+
+        let function_type =
+            context
+                .void_type()
+                .fn_type(
+                    &[
+                        pointer_type.into(),
+                        pointer_type.into(),
+                    ],
+                    false,
+                );
+
+        let function =
+            module.add_function(
+                function_name,
+                function_type,
+                None,
+            );
+
+        let entry =
+            context.append_basic_block(
+                function,
+                "entry",
+            );
+
+        let builder =
+            context.create_builder();
+
+        builder.position_at_end(
+            entry
+        );
+
+        let argument_array =
+            function
+                .get_nth_param(0)
+                .ok_or_else(|| {
+                    "missing dynamic argument array"
+                        .to_string()
+                })?
+                .into_pointer_value();
+
+        let result_pointer =
+            function
+                .get_nth_param(1)
+                .ok_or_else(|| {
+                    "missing dynamic result pointer"
+                        .to_string()
+                })?
+                .into_pointer_value();
+
+        let arguments =
+            self.build_dynamic_argument_pointers(
+                context,
+                &builder,
+                argument_array,
+                &closure.arguments,
+            )?;
+
+        let lowering =
+            Lowering;
+
+        let value =
+            lowering.lower_expr(
+                context,
+                &builder,
+                function,
+                &arguments,
+                &closure.arguments,
+                &closure.return_type,
+                &closure.body,
+            )?;
+
+        let value =
+            lowering.materialize_value(
+                context,
+                &builder,
+                value,
+            )?;
+
+        builder
+            .build_store(
+                result_pointer,
+                value,
+            )
+            .map_err(|error| {
+                format!(
+                    "failed to store dynamic return value: {:?}",
+                    error
+                )
+            })?;
+
+        builder
+            .build_return(None)
+            .map_err(|error| {
+                format!(
+                    "failed to build dynamic return: {:?}",
+                    error
+                )
+            })?;
+
+        if function.verify(true) {
+            Ok(())
+        } else {
+            Err(
+                "LLVM dynamic function verification failed"
+                    .to_string()
+            )
+        }
+    }
+
+
+    // ========================================================
+    // Typed argument pointers
     // ========================================================
 
     fn build_argument_pointers(
@@ -387,7 +452,6 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(Vec::new());
         }
 
-
         let field_types =
             argument_types
                 .iter()
@@ -402,19 +466,16 @@ impl<'ctx> Compiler<'ctx> {
                     _,
                 >>()?;
 
-
         let tuple_type =
             context.struct_type(
                 &field_types,
                 false,
             );
 
-
         let mut result =
             Vec::with_capacity(
                 argument_types.len()
             );
-
 
         for index
             in 0..argument_types.len()
@@ -438,10 +499,89 @@ impl<'ctx> Compiler<'ctx> {
                         )
                     })?;
 
-
             result.push(pointer);
         }
 
+        Ok(result)
+    }
+
+
+    // ========================================================
+    // Dynamic argument pointers
+    // ========================================================
+
+    fn build_dynamic_argument_pointers(
+        &self,
+        context: &'ctx Context,
+        builder: &Builder<'ctx>,
+        argument_array: PointerValue<'ctx>,
+        argument_types: &[TypeInfo],
+    ) -> Result<
+        Vec<PointerValue<'ctx>>,
+        String,
+    > {
+        let pointer_type =
+            context.ptr_type(
+                AddressSpace::default(),
+            );
+
+        let mut result =
+            Vec::with_capacity(
+                argument_types.len()
+            );
+
+        for index
+            in 0..argument_types.len()
+        {
+            let index_value =
+                context
+                    .i64_type()
+                    .const_int(
+                        index as u64,
+                        false,
+                    );
+
+            let pointer =
+                unsafe {
+                    builder
+                        .build_gep(
+                            pointer_type,
+                            argument_array,
+                            &[index_value],
+                            &format!(
+                                "dynamic_arg{}_slot",
+                                index
+                            ),
+                        )
+                }
+                .map_err(|error| {
+                    format!(
+                        "failed to build dynamic argument GEP: {:?}",
+                        error
+                    )
+                })?;
+
+            let value =
+                builder
+                    .build_load(
+                        pointer_type,
+                        pointer,
+                        &format!(
+                            "dynamic_arg{}_ptr",
+                            index
+                        ),
+                    )
+                    .map_err(|error| {
+                        format!(
+                            "failed to load dynamic argument {} pointer: {:?}",
+                            index,
+                            error
+                        )
+                    })?
+                    .into_pointer_value();
+
+            result.push(value);
+        }
 
         Ok(result)
     }
@@ -538,7 +678,6 @@ pub(crate) fn llvm_type<'ctx>(
                         Vec<_>,
                         _,
                     >>()?;
-
 
             Ok(
                 context

@@ -131,7 +131,7 @@ fn expand_compile_closure(
 
 
                 __compiler
-                    .compile_typed::<
+                    .compile::<
                         #tuple_type,
                         #return_type,
                     >(
