@@ -33,9 +33,7 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
                 let value = lower_expr(&initializer.expr, arguments, &current_locals, Some(&local_type))?;
                 let index = current_locals.len();
                 let type_info = quote! { <#local_type as ::closure_llvm::CompileType>::type_info() };
-                statement_tokens.push(quote! {
-                    ::closure_llvm::Statement::Let { local: #index, type_info: #type_info, value: #value, mutable: #mutable }
-                });
+                statement_tokens.push(quote! { ::closure_llvm::Statement::Let { local: #index, type_info: #type_info, value: #value, mutable: #mutable } });
                 current_locals.push(LocalVariable { name, index, type_info: Some(local_type), mutable });
             }
             Stmt::Expr(expr, _) => {
@@ -46,7 +44,7 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
                     continue;
                 }
                 if let syn::Expr::ForLoop(for_expr) = expr {
-                    let name = match &for_expr.pat {
+                    let name = match &*for_expr.pat {
                         Pat::Ident(pattern) => pattern.ident.clone(),
                         _ => return Err(syn::Error::new_spanned(&for_expr.pat, "for loop bindings must use identifiers")),
                     };
@@ -56,9 +54,7 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
                     };
                     let start = range.start.as_ref().ok_or_else(|| syn::Error::new_spanned(range, "for ranges require a start value"))?;
                     let end = range.end.as_ref().ok_or_else(|| syn::Error::new_spanned(range, "for ranges require an end value"))?;
-                    let local_type = expression_type(start, arguments, &current_locals)
-                        .or_else(|| expression_type(end, arguments, &current_locals))
-                        .ok_or_else(|| syn::Error::new_spanned(range, "cannot infer for-loop range type"))?;
+                    let local_type = expression_type(start, arguments, &current_locals).or_else(|| expression_type(end, arguments, &current_locals)).ok_or_else(|| syn::Error::new_spanned(range, "cannot infer for-loop range type"))?;
                     let start_expr = lower_expr(start, arguments, &current_locals, Some(&local_type))?;
                     let end_expr = lower_expr(end, arguments, &current_locals, Some(&local_type))?;
                     let local_index = current_locals.len();
@@ -67,16 +63,7 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
                     body_locals.push(LocalVariable { name: name.clone(), index: local_index, type_info: Some(local_type.clone()), mutable: false });
                     let body = lower_block(&for_expr.body, arguments, &body_locals, None)?;
                     let inclusive = matches!(range.limits, syn::RangeLimits::Closed(_));
-                    statement_tokens.push(quote! {
-                        ::closure_llvm::Statement::For {
-                            local: #local_index,
-                            type_info: #type_info,
-                            start: #start_expr,
-                            end: #end_expr,
-                            inclusive: #inclusive,
-                            body: #body,
-                        }
-                    });
+                    statement_tokens.push(quote! { ::closure_llvm::Statement::For { local: #local_index, type_info: #type_info, start: #start_expr, end: #end_expr, inclusive: #inclusive, body: #body } });
                     current_locals.push(LocalVariable { name, index: local_index, type_info: Some(local_type), mutable: false });
                     continue;
                 }
@@ -86,35 +73,21 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
                     statement_tokens.push(quote! { ::closure_llvm::Statement::Assign { local: #index, value: #value } });
                     continue;
                 }
-                if !is_last {
-                    return Err(syn::Error::new_spanned(expr, "only let bindings, assignments, while loops, for loops, and a final expression are supported"));
-                }
+                if !is_last { return Err(syn::Error::new_spanned(expr, "only let bindings, assignments, while loops, and for loops may precede the final expression")); }
                 result = Some(lower_expr(expr, arguments, &current_locals, expected_type)?);
             }
             other => return Err(syn::Error::new_spanned(other, "only let bindings, assignments, while loops, for loops, and a final expression are supported")),
         }
     }
 
-    if result.is_none() && expected_type.is_some() {
-        return Err(syn::Error::new(proc_macro2::Span::call_site(), "closure block must end with an expression"));
-    }
-
-    let result_tokens = match result {
-        Some(result) => quote! { Some(#result) },
-        None => quote! { None },
-    };
-
+    if result.is_none() && expected_type.is_some() { return Err(syn::Error::new(proc_macro2::Span::call_site(), "closure block must end with an expression")); }
+    let result_tokens = match result { Some(result) => quote! { Some(#result) }, None => quote! { None } };
     Ok(quote! { ::closure_llvm::Block { statements: vec![#(#statement_tokens),*], result: #result_tokens } })
 }
 
 fn assignment_target<'a>(assign: &ExprAssign, locals: &'a [LocalVariable]) -> syn::Result<(usize, Option<&'a Type>)> {
-    let name = match &*assign.left {
-        syn::Expr::Path(path) if path.path.segments.len() == 1 => &path.path.segments[0].ident,
-        _ => return Err(syn::Error::new_spanned(&assign.left, "assignment targets must be local variables")),
-    };
+    let name = match &*assign.left { syn::Expr::Path(path) if path.path.segments.len() == 1 => &path.path.segments[0].ident, _ => return Err(syn::Error::new_spanned(&assign.left, "assignment targets must be local variables")) };
     let local = locals.iter().rev().find(|local| &local.name == name).ok_or_else(|| syn::Error::new_spanned(&assign.left, format!("unknown local variable `{}`", name)))?;
-    if !local.mutable {
-        return Err(syn::Error::new_spanned(&assign.left, format!("cannot assign to immutable variable `{}`", name)));
-    }
+    if !local.mutable { return Err(syn::Error::new_spanned(&assign.left, format!("cannot assign to immutable variable `{}`", name))); }
     Ok((local.index, local.type_info.as_ref()))
 }
