@@ -3,6 +3,7 @@ mod expr;
 mod jit;
 mod lowering;
 mod operators;
+mod statement_lowering;
 mod types;
 mod value;
 
