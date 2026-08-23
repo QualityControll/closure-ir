@@ -12,7 +12,10 @@ use crate::parser::ClosureArgument;
 
 use super::{
     block::lower_block,
-    expression::lower_expr,
+    expression::{
+        lower_expr,
+        LocalVariable,
+    },
 };
 
 
@@ -23,12 +26,14 @@ use super::{
 pub(crate) fn lower_if(
     if_expr: &ExprIf,
     arguments: &[ClosureArgument],
+    locals: &[LocalVariable],
     expected_type: Option<&Type>,
 ) -> syn::Result<TokenStream> {
     let condition =
         lower_expr(
             &if_expr.cond,
             arguments,
+            locals,
             Some(
                 &Type::Verbatim(
                     quote! {
@@ -43,6 +48,7 @@ pub(crate) fn lower_if(
         lower_block(
             &if_expr.then_branch,
             arguments,
+            locals,
             expected_type,
         )?;
 
@@ -65,6 +71,7 @@ pub(crate) fn lower_if(
                 lower_block(
                     &block.block,
                     arguments,
+                    locals,
                     expected_type,
                 )?,
 
@@ -72,6 +79,7 @@ pub(crate) fn lower_if(
                 lower_if(
                     nested,
                     arguments,
+                    locals,
                     expected_type,
                 )?,
 

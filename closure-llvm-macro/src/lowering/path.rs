@@ -6,14 +6,18 @@ use syn::ExprPath;
 
 use crate::parser::ClosureArgument;
 
+use super::expression::LocalVariable;
+
 
 // ============================================================
-// Argument
+// Path
 // ============================================================
 
 pub(crate) fn lower_path(
     path: &ExprPath,
     arguments: &[ClosureArgument],
+    locals: &[LocalVariable],
+    _expected_type: Option<&syn::Type>,
 ) -> syn::Result<TokenStream> {
     if path.path.segments.len() != 1 {
         return Err(
@@ -27,23 +31,34 @@ pub(crate) fn lower_path(
     let name =
         &path.path.segments[0].ident;
 
-    let index =
+    if let Some(index) =
         arguments
             .iter()
             .position(|argument| &argument.name == name)
-            .ok_or_else(|| {
-                syn::Error::new_spanned(
-                    path,
-                    format!(
-                        "unknown closure argument `{}`",
-                        name
-                    ),
-                )
-            })?;
+    {
+        return Ok(
+            quote! {
+                ::closure_llvm::Expr::Argument(#index)
+            }
+        );
+    }
 
-    Ok(
-        quote! {
-            ::closure_llvm::Expr::Argument(#index)
-        }
+    if let Some(local) =
+        locals
+            .iter()
+            .rev()
+            .find(|local| &local.name == name)
+    {
+        return Ok(local.value.clone());
+    }
+
+    Err(
+        syn::Error::new_spanned(
+            path,
+            format!(
+                "unknown closure argument or local variable `{}`",
+                name
+            ),
+        )
     )
 }

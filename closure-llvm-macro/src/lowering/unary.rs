@@ -9,7 +9,10 @@ use syn::{
 
 use crate::parser::ClosureArgument;
 
-use super::expression::lower_expr;
+use super::expression::{
+    lower_expr,
+    LocalVariable,
+};
 
 
 // ============================================================
@@ -19,12 +22,14 @@ use super::expression::lower_expr;
 pub(crate) fn lower_unary(
     unary: &ExprUnary,
     arguments: &[ClosureArgument],
+    locals: &[LocalVariable],
     expected_type: Option<&Type>,
 ) -> syn::Result<TokenStream> {
     let operand =
         lower_expr(
             &unary.expr,
             arguments,
+            locals,
             expected_type,
         )?;
 

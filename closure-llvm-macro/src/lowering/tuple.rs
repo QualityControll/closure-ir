@@ -6,7 +6,10 @@ use syn::ExprTuple;
 
 use crate::parser::ClosureArgument;
 
-use super::expression::lower_expr;
+use super::expression::{
+    lower_expr,
+    LocalVariable,
+};
 
 
 // ============================================================
@@ -16,6 +19,7 @@ use super::expression::lower_expr;
 pub(crate) fn lower_tuple(
     tuple: &ExprTuple,
     arguments: &[ClosureArgument],
+    locals: &[LocalVariable],
 ) -> syn::Result<TokenStream> {
     let elements =
         tuple
@@ -25,6 +29,7 @@ pub(crate) fn lower_tuple(
                 lower_expr(
                     element,
                     arguments,
+                    locals,
                     None,
                 )
             })
