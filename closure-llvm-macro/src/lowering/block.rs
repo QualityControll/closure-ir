@@ -47,6 +47,41 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
                     });
                     continue;
                 }
+                if let syn::Expr::ForLoop(for_expr) = expr {
+                    let name = match &for_expr.pat {
+                        Pat::Ident(pattern) => pattern.ident.clone(),
+                        _ => return Err(syn::Error::new_spanned(&for_expr.pat, "for loop bindings must use identifiers")),
+                    };
+                    let range = match &*for_expr.expr {
+                        syn::Expr::Range(range) => range,
+                        _ => return Err(syn::Error::new_spanned(&for_expr.expr, "for loops currently require a range expression")),
+                    };
+                    let start = range.start.as_ref().ok_or_else(|| syn::Error::new_spanned(range, "for ranges require a start value"))?;
+                    let end = range.end.as_ref().ok_or_else(|| syn::Error::new_spanned(range, "for ranges require an end value"))?;
+                    let local_type = expression_type(start, arguments, &current_locals)
+                        .or_else(|| expression_type(end, arguments, &current_locals))
+                        .ok_or_else(|| syn::Error::new_spanned(range, "cannot infer for-loop range type"))?;
+                    let start_expr = lower_expr(start, arguments, &current_locals, Some(&local_type))?;
+                    let end_expr = lower_expr(end, arguments, &current_locals, Some(&local_type))?;
+                    let local_index = current_locals.len();
+                    let type_info = quote! { <#local_type as ::closure_llvm::CompileType>::type_info() };
+                    let mut body_locals = current_locals.clone();
+                    body_locals.push(LocalVariable { name, index: local_index, type_info: Some(local_type.clone()), mutable: false });
+                    let body = lower_block(&for_expr.body, arguments, &body_locals, None)?;
+                    let inclusive = range.limits == syn::RangeLimits::Closed(syn::token::DotDotEq::default());
+                    statement_tokens.push(quote! {
+                        ::closure_llvm::Statement::For {
+                            local: #local_index,
+                            type_info: #type_info,
+                            start: #start_expr,
+                            end: #end_expr,
+                            inclusive: #inclusive,
+                            body: #body,
+                        }
+                    });
+                    current_locals.push(LocalVariable { name: syn::Ident::new("__for_unused", proc_macro2::Span::call_site()), index: local_index, type_info: Some(local_type), mutable: false });
+                    continue;
+                }
                 if let syn::Expr::Assign(assign) = expr {
                     let (index, expected) = assignment_target(assign, &current_locals)?;
                     let value = lower_expr(&assign.right, arguments, &current_locals, expected)?;
@@ -54,11 +89,11 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
                     continue;
                 }
                 if !is_last {
-                    return Err(syn::Error::new_spanned(expr, "only let bindings, assignments, and while loops may precede the final expression"));
+                    return Err(syn::Error::new_spanned(expr, "only let bindings, assignments, while loops, for loops, and a final expression are supported"));
                 }
                 result = Some(lower_expr(expr, arguments, &current_locals, expected_type)?);
             }
-            other => return Err(syn::Error::new_spanned(other, "only let bindings, assignments, while loops, and a final expression are supported")),
+            other => return Err(syn::Error::new_spanned(other, "only let bindings, assignments, while loops, for loops, and a final expression are supported")),
         }
     }
 
