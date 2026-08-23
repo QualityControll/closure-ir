@@ -26,6 +26,7 @@ use super::{
 pub(crate) struct LocalVariable {
     pub(crate) name: syn::Ident,
     pub(crate) value: TokenStream,
+    pub(crate) type_info: Option<Type>,
 }
 
 
@@ -115,10 +116,11 @@ pub(crate) fn lower_expr(
 // Determine expression type
 // ============================================================
 
-pub(crate) fn expression_type<'a>(
+pub(crate) fn expression_type(
     expr: &SynExpr,
-    arguments: &'a [ClosureArgument],
-) -> Option<&'a Type> {
+    arguments: &[ClosureArgument],
+    locals: &[LocalVariable],
+) -> Option<Type> {
     match expr {
         SynExpr::Path(path) => {
             if path.path.segments.len() != 1 {
@@ -128,31 +130,39 @@ pub(crate) fn expression_type<'a>(
             let name =
                 &path.path.segments[0].ident;
 
-            arguments
+            if let Some(argument) =
+                arguments
+                    .iter()
+                    .find(|argument| &argument.name == name)
+            {
+                return Some(argument.type_info.clone());
+            }
+
+            locals
                 .iter()
-                .find(|argument| {
-                    &argument.name == name
-                })
-                .map(|argument| {
-                    &argument.type_info
-                })
+                .rev()
+                .find(|local| &local.name == name)
+                .and_then(|local| local.type_info.clone())
         }
 
         SynExpr::Paren(paren) =>
             expression_type(
                 &paren.expr,
                 arguments,
+                locals,
             ),
 
         SynExpr::Binary(binary) =>
             expression_type(
                 &binary.left,
                 arguments,
+                locals,
             )
             .or_else(|| {
                 expression_type(
                     &binary.right,
                     arguments,
+                    locals,
                 )
             }),
 
