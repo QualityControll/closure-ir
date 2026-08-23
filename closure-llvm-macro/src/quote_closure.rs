@@ -87,7 +87,9 @@ fn expand_quote_closure(
                         ::type_info(),
 
                 body:
-                    #expression,
+                    ::closure_llvm::Block::expression(
+                        #expression
+                    ),
             }
         }
     )

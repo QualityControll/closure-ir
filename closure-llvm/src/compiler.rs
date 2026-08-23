@@ -27,144 +27,61 @@ use crate::{
 // ============================================================
 
 pub struct Compiler<'ctx> {
-    pub(crate) context:
-        &'ctx Context,
+    pub(crate) context: &'ctx Context,
 }
 
 
 impl<'ctx> Compiler<'ctx> {
-    pub fn new(
-        context: &'ctx Context,
-    ) -> Self {
-        Self {
-            context,
-        }
+    pub fn new(context: &'ctx Context) -> Self {
+        Self { context }
     }
-
-
-    // ========================================================
-    // Typed compilation
-    // ========================================================
 
     pub fn compile<Args, Ret>(
         &self,
         closure: &Closure,
-    ) -> Result<
-        CompiledClosure<'ctx, Args, Ret>,
-        String,
-    >
+    ) -> Result<CompiledClosure<'ctx, Args, Ret>, String>
     where
         Args: CompileType,
         Ret: CompileType + 'static,
     {
-        let context =
-            self.context;
+        let context = self.context;
+        let module = context.create_module("closure_module");
+        let function_name = "compiled_closure";
 
-        let module =
-            context.create_module(
-                "closure_module"
-            );
+        self.generate_function(context, &module, function_name, closure)?;
 
-        let function_name =
-            "compiled_closure";
+        println!("Generated LLVM IR:\n{}", module.print_to_string().to_string());
 
-        self.generate_function(
-            context,
-            &module,
-            function_name,
-            closure,
-        )?;
+        let engine = module
+            .create_jit_execution_engine(OptimizationLevel::None)
+            .map_err(|error| format!("failed to create JIT: {:?}", error))?;
 
-        println!(
-            "Generated LLVM IR:\n{}",
-            module
-                .print_to_string()
-                .to_string()
-        );
-
-        let engine =
-            module
-                .create_jit_execution_engine(
-                    OptimizationLevel::None,
-                )
-                .map_err(|error| {
-                    format!(
-                        "failed to create JIT: {:?}",
-                        error
-                    )
-                })?;
-
-        Ok(
-            CompiledClosure::new(
-                engine,
-                function_name.to_string(),
-            )
-        )
+        Ok(CompiledClosure::new(engine, function_name.to_string()))
     }
-
-
-    // ========================================================
-    // Dynamic compilation
-    // ========================================================
 
     pub fn compile_dynamic(
         &self,
         closure: &Closure,
-    ) -> Result<
-        DynamicCompiledClosure<'ctx>,
-        String,
-    > {
-        let context =
-            self.context;
+    ) -> Result<DynamicCompiledClosure<'ctx>, String> {
+        let context = self.context;
+        let module = context.create_module("dynamic_closure_module");
+        let function_name = "compiled_dynamic_closure";
 
-        let module =
-            context.create_module(
-                "dynamic_closure_module"
-            );
+        self.generate_dynamic_function(context, &module, function_name, closure)?;
 
-        let function_name =
-            "compiled_dynamic_closure";
+        println!("Generated dynamic LLVM IR:\n{}", module.print_to_string().to_string());
 
-        self.generate_dynamic_function(
-            context,
-            &module,
-            function_name,
-            closure,
-        )?;
+        let engine = module
+            .create_jit_execution_engine(OptimizationLevel::None)
+            .map_err(|error| format!("failed to create JIT: {:?}", error))?;
 
-        println!(
-            "Generated dynamic LLVM IR:\n{}",
-            module
-                .print_to_string()
-                .to_string()
-        );
-
-        let engine =
-            module
-                .create_jit_execution_engine(
-                    OptimizationLevel::None,
-                )
-                .map_err(|error| {
-                    format!(
-                        "failed to create JIT: {:?}",
-                        error
-                    )
-                })?;
-
-        Ok(
-            DynamicCompiledClosure::new(
-                engine,
-                function_name.to_string(),
-                closure.arguments.clone(),
-                closure.return_type.clone(),
-            )
-        )
+        Ok(DynamicCompiledClosure::new(
+            engine,
+            function_name.to_string(),
+            closure.arguments.clone(),
+            closure.return_type.clone(),
+        ))
     }
-
-
-    // ========================================================
-    // Typed function generation
-    // ========================================================
 
     fn generate_function(
         &self,
@@ -173,144 +90,58 @@ impl<'ctx> Compiler<'ctx> {
         function_name: &str,
         closure: &Closure,
     ) -> Result<(), String> {
-        let argument_pointer_type =
-            context.ptr_type(
-                AddressSpace::default(),
-            );
-
-        let result_pointer_type =
-            context.ptr_type(
-                AddressSpace::default(),
-            );
-
-        let function_type =
-            context
-                .void_type()
-                .fn_type(
-                    &[
-                        argument_pointer_type.into(),
-                        result_pointer_type.into(),
-                    ],
-                    false,
-                );
-
-        let function =
-            module.add_function(
-                function_name,
-                function_type,
-                None,
-            );
-
-        let entry =
-            context.append_basic_block(
-                function,
-                "entry",
-            );
-
-        let builder =
-            context.create_builder();
-
-        builder.position_at_end(
-            entry
+        let argument_pointer_type = context.ptr_type(AddressSpace::default());
+        let result_pointer_type = context.ptr_type(AddressSpace::default());
+        let function_type = context.void_type().fn_type(
+            &[argument_pointer_type.into(), result_pointer_type.into()],
+            false,
         );
+        let function = module.add_function(function_name, function_type, None);
+        let entry = context.append_basic_block(function, "entry");
+        let builder = context.create_builder();
+        builder.position_at_end(entry);
 
-        let argument_pointer =
-            function
-                .get_nth_param(0)
-                .ok_or_else(|| {
-                    "missing function argument"
-                        .to_string()
-                })?
-                .into_pointer_value();
+        let argument_pointer = function
+            .get_nth_param(0)
+            .ok_or_else(|| "missing function argument".to_string())?
+            .into_pointer_value();
+        let result_pointer = function
+            .get_nth_param(1)
+            .ok_or_else(|| "missing result pointer".to_string())?
+            .into_pointer_value();
 
-        let result_pointer =
-            function
-                .get_nth_param(1)
-                .ok_or_else(|| {
-                    "missing result pointer"
-                        .to_string()
-                })?
-                .into_pointer_value();
+        let arguments = self.build_argument_pointers(
+            context,
+            &builder,
+            argument_pointer,
+            &closure.arguments,
+        )?;
 
-        let arguments =
-            self.build_argument_pointers(
-                context,
-                &builder,
-                argument_pointer,
-                &closure.arguments,
-            )?;
-
-        let lowering =
-            Lowering;
-
-        let value =
-            lowering.lower_expr(
-                context,
-                &builder,
-                function,
-                &arguments,
-                &closure.arguments,
-                &closure.return_type,
-                &closure.body,
-            )?;
-
-        let value =
-            lowering.materialize_value(
-                context,
-                &builder,
-                value,
-            )?;
+        let lowering = Lowering;
+        let value = lowering.lower_expr(
+            context,
+            &builder,
+            function,
+            &arguments,
+            &closure.arguments,
+            &closure.return_type,
+            &closure.body.result,
+        )?;
+        let value = lowering.materialize_value(context, &builder, value)?;
 
         builder
-            .build_store(
-                result_pointer,
-                value,
-            )
-            .map_err(|error| {
-                format!(
-                    "failed to store return value: {:?}",
-                    error
-                )
-            })?;
-
+            .build_store(result_pointer, value)
+            .map_err(|error| format!("failed to store return value: {:?}", error))?;
         builder
             .build_return(None)
-            .map_err(|error| {
-                format!(
-                    "failed to build return: {:?}",
-                    error
-                )
-            })?;
+            .map_err(|error| format!("failed to build return: {:?}", error))?;
 
         if function.verify(true) {
             Ok(())
         } else {
-            Err(
-                "LLVM function verification failed"
-                    .to_string()
-            )
+            Err("LLVM function verification failed".to_string())
         }
     }
-
-
-    // ========================================================
-    // Dynamic function generation
-    //
-    // LLVM ABI:
-    //
-    //     void compiled_dynamic_closure(
-    //         ptr args,
-    //         ptr result
-    //     )
-    //
-    // where `args` is an array of pointers:
-    //
-    //     args[0] -> argument 0
-    //     args[1] -> argument 1
-    //     ...
-    //
-    // This avoids depending on Rust tuple layout.
-    // ========================================================
 
     fn generate_dynamic_function(
         &self,
@@ -319,124 +150,57 @@ impl<'ctx> Compiler<'ctx> {
         function_name: &str,
         closure: &Closure,
     ) -> Result<(), String> {
-        let pointer_type =
-            context.ptr_type(
-                AddressSpace::default(),
-            );
-
-        let function_type =
-            context
-                .void_type()
-                .fn_type(
-                    &[
-                        pointer_type.into(),
-                        pointer_type.into(),
-                    ],
-                    false,
-                );
-
-        let function =
-            module.add_function(
-                function_name,
-                function_type,
-                None,
-            );
-
-        let entry =
-            context.append_basic_block(
-                function,
-                "entry",
-            );
-
-        let builder =
-            context.create_builder();
-
-        builder.position_at_end(
-            entry
+        let pointer_type = context.ptr_type(AddressSpace::default());
+        let function_type = context.void_type().fn_type(
+            &[pointer_type.into(), pointer_type.into()],
+            false,
         );
+        let function = module.add_function(function_name, function_type, None);
+        let entry = context.append_basic_block(function, "entry");
+        let builder = context.create_builder();
+        builder.position_at_end(entry);
 
-        let argument_array =
-            function
-                .get_nth_param(0)
-                .ok_or_else(|| {
-                    "missing dynamic argument array"
-                        .to_string()
-                })?
-                .into_pointer_value();
+        let argument_array = function
+            .get_nth_param(0)
+            .ok_or_else(|| "missing dynamic argument array".to_string())?
+            .into_pointer_value();
+        let result_pointer = function
+            .get_nth_param(1)
+            .ok_or_else(|| "missing dynamic result pointer".to_string())?
+            .into_pointer_value();
 
-        let result_pointer =
-            function
-                .get_nth_param(1)
-                .ok_or_else(|| {
-                    "missing dynamic result pointer"
-                        .to_string()
-                })?
-                .into_pointer_value();
+        let arguments = self.build_dynamic_argument_pointers(
+            context,
+            &builder,
+            argument_array,
+            &closure.arguments,
+        )?;
 
-        let arguments =
-            self.build_dynamic_argument_pointers(
-                context,
-                &builder,
-                argument_array,
-                &closure.arguments,
-            )?;
-
-        let lowering =
-            Lowering;
-
-        let value =
-            lowering.lower_expr(
-                context,
-                &builder,
-                function,
-                &arguments,
-                &closure.arguments,
-                &closure.return_type,
-                &closure.body,
-            )?;
-
-        let value =
-            lowering.materialize_value(
-                context,
-                &builder,
-                value,
-            )?;
+        let lowering = Lowering;
+        let value = lowering.lower_expr(
+            context,
+            &builder,
+            function,
+            &arguments,
+            &closure.arguments,
+            &closure.return_type,
+            &closure.body.result,
+        )?;
+        let value = lowering.materialize_value(context, &builder, value)?;
 
         builder
-            .build_store(
-                result_pointer,
-                value,
-            )
-            .map_err(|error| {
-                format!(
-                    "failed to store dynamic return value: {:?}",
-                    error
-                )
-            })?;
-
+            .build_store(result_pointer, value)
+            .map_err(|error| format!("failed to store dynamic return value: {:?}", error))?;
         builder
             .build_return(None)
-            .map_err(|error| {
-                format!(
-                    "failed to build dynamic return: {:?}",
-                    error
-                )
-            })?;
+            .map_err(|error| format!("failed to build return: {:?}", error))?;
 
         if function.verify(true) {
             Ok(())
         } else {
-            Err(
-                "LLVM dynamic function verification failed"
-                    .to_string()
-            )
+            Err("LLVM dynamic function verification failed".to_string())
         }
     }
-
-
-    // ========================================================
-    // Typed argument pointers
-    // ========================================================
 
     fn build_argument_pointers(
         &self,
@@ -444,71 +208,32 @@ impl<'ctx> Compiler<'ctx> {
         builder: &Builder<'ctx>,
         argument_pointer: PointerValue<'ctx>,
         argument_types: &[TypeInfo],
-    ) -> Result<
-        Vec<PointerValue<'ctx>>,
-        String,
-    > {
+    ) -> Result<Vec<PointerValue<'ctx>>, String> {
         if argument_types.is_empty() {
             return Ok(Vec::new());
         }
 
-        let field_types =
-            argument_types
-                .iter()
-                .map(|type_info| {
-                    llvm_type(
-                        context,
-                        type_info,
-                    )
-                })
-                .collect::<Result<
-                    Vec<_>,
-                    _,
-                >>()?;
+        let field_types = argument_types
+            .iter()
+            .map(|type_info| llvm_type(context, type_info))
+            .collect::<Result<Vec<_>, _>>()?;
+        let tuple_type = context.struct_type(&field_types, false);
+        let mut result = Vec::with_capacity(argument_types.len());
 
-        let tuple_type =
-            context.struct_type(
-                &field_types,
-                false,
-            );
-
-        let mut result =
-            Vec::with_capacity(
-                argument_types.len()
-            );
-
-        for index
-            in 0..argument_types.len()
-        {
-            let pointer =
-                builder
-                    .build_struct_gep(
-                        tuple_type,
-                        argument_pointer,
-                        index as u32,
-                        &format!(
-                            "arg{}_ptr",
-                            index
-                        ),
-                    )
-                    .map_err(|error| {
-                        format!(
-                            "failed to build argument {} GEP: {:?}",
-                            index,
-                            error
-                        )
-                    })?;
-
+        for index in 0..argument_types.len() {
+            let pointer = builder
+                .build_struct_gep(
+                    tuple_type,
+                    argument_pointer,
+                    index as u32,
+                    &format!("arg{}_ptr", index),
+                )
+                .map_err(|error| format!("failed to build argument {} GEP: {:?}", index, error))?;
             result.push(pointer);
         }
 
         Ok(result)
     }
-
-
-    // ========================================================
-    // Dynamic argument pointers
-    // ========================================================
 
     fn build_dynamic_argument_pointers(
         &self,
@@ -516,70 +241,32 @@ impl<'ctx> Compiler<'ctx> {
         builder: &Builder<'ctx>,
         argument_array: PointerValue<'ctx>,
         argument_types: &[TypeInfo],
-    ) -> Result<
-        Vec<PointerValue<'ctx>>,
-        String,
-    > {
-        let pointer_type =
-            context.ptr_type(
-                AddressSpace::default(),
-            );
+    ) -> Result<Vec<PointerValue<'ctx>>, String> {
+        let pointer_type = context.ptr_type(AddressSpace::default());
+        let mut result = Vec::with_capacity(argument_types.len());
 
-        let mut result =
-            Vec::with_capacity(
-                argument_types.len()
-            );
+        for index in 0..argument_types.len() {
+            let index_value = context.i64_type().const_int(index as u64, false);
+            let pointer = unsafe {
+                builder.build_gep(
+                    pointer_type,
+                    argument_array,
+                    &[index_value],
+                    &format!("dynamic_arg{}_slot", index),
+                )
+            }
+            .map_err(|error| format!("failed to build dynamic argument GEP: {:?}", error))?;
 
-        for index
-            in 0..argument_types.len()
-        {
-            let index_value =
-                context
-                    .i64_type()
-                    .const_int(
-                        index as u64,
-                        false,
-                    );
-
-            let pointer =
-                unsafe {
-                    builder
-                        .build_gep(
-                            pointer_type,
-                            argument_array,
-                            &[index_value],
-                            &format!(
-                                "dynamic_arg{}_slot",
-                                index
-                            ),
-                        )
-                }
+            let value = builder
+                .build_load(
+                    pointer_type,
+                    pointer,
+                    &format!("dynamic_arg{}_ptr", index),
+                )
                 .map_err(|error| {
-                    format!(
-                        "failed to build dynamic argument GEP: {:?}",
-                        error
-                    )
-                })?;
-
-            let value =
-                builder
-                    .build_load(
-                        pointer_type,
-                        pointer,
-                        &format!(
-                            "dynamic_arg{}_ptr",
-                            index
-                        ),
-                    )
-                    .map_err(|error| {
-                        format!(
-                            "failed to load dynamic argument {} pointer: {:?}",
-                            index,
-                            error
-                        )
-                    })?
-                    .into_pointer_value();
-
+                    format!("failed to load dynamic argument {} pointer: {:?}", index, error)
+                })?
+                .into_pointer_value();
             result.push(value);
         }
 
@@ -595,98 +282,22 @@ impl<'ctx> Compiler<'ctx> {
 pub(crate) fn llvm_type<'ctx>(
     context: &'ctx Context,
     type_info: &TypeInfo,
-) -> Result<
-    BasicTypeEnum<'ctx>,
-    String,
-> {
+) -> Result<BasicTypeEnum<'ctx>, String> {
     match type_info {
-        TypeInfo::F32 =>
-            Ok(
-                context
-                    .f32_type()
-                    .into()
-            ),
-
-        TypeInfo::F64 =>
-            Ok(
-                context
-                    .f64_type()
-                    .into()
-            ),
-
-        TypeInfo::I8
-        | TypeInfo::U8 =>
-            Ok(
-                context
-                    .i8_type()
-                    .into()
-            ),
-
-        TypeInfo::I16
-        | TypeInfo::U16 =>
-            Ok(
-                context
-                    .i16_type()
-                    .into()
-            ),
-
-        TypeInfo::I32
-        | TypeInfo::U32 =>
-            Ok(
-                context
-                    .i32_type()
-                    .into()
-            ),
-
-        TypeInfo::I64
-        | TypeInfo::U64 =>
-            Ok(
-                context
-                    .i64_type()
-                    .into()
-            ),
-
-        TypeInfo::I128
-        | TypeInfo::U128 =>
-            Ok(
-                context
-                    .i128_type()
-                    .into()
-            ),
-
-        TypeInfo::Bool =>
-            Ok(
-                context
-                    .bool_type()
-                    .into()
-            ),
-
-        TypeInfo::Struct {
-            fields,
-            ..
-        } => {
-            let field_types =
-                fields
-                    .iter()
-                    .map(|field| {
-                        llvm_type(
-                            context,
-                            &field.type_info,
-                        )
-                    })
-                    .collect::<Result<
-                        Vec<_>,
-                        _,
-                    >>()?;
-
-            Ok(
-                context
-                    .struct_type(
-                        &field_types,
-                        false,
-                    )
-                    .into()
-            )
+        TypeInfo::F32 => Ok(context.f32_type().into()),
+        TypeInfo::F64 => Ok(context.f64_type().into()),
+        TypeInfo::I8 | TypeInfo::U8 => Ok(context.i8_type().into()),
+        TypeInfo::I16 | TypeInfo::U16 => Ok(context.i16_type().into()),
+        TypeInfo::I32 | TypeInfo::U32 => Ok(context.i32_type().into()),
+        TypeInfo::I64 | TypeInfo::U64 => Ok(context.i64_type().into()),
+        TypeInfo::I128 | TypeInfo::U128 => Ok(context.i128_type().into()),
+        TypeInfo::Bool => Ok(context.bool_type().into()),
+        TypeInfo::Struct { fields, .. } => {
+            let field_types = fields
+                .iter()
+                .map(|field| llvm_type(context, &field.type_info))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(context.struct_type(&field_types, false).into())
         }
     }
 }
