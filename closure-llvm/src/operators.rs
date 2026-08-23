@@ -10,7 +10,6 @@ pub(crate) enum UnaryOp { Not, Neg }
 pub(crate) fn expression_type(argument_types: &[TypeInfo], expr: &Expr) -> Result<TypeInfo, String> {
     match expr {
         Expr::Argument(index) => argument_types.get(*index).cloned().ok_or_else(|| format!("argument index {} out of bounds", index)),
-        Expr::Local(_) => Err("local expression type requires local type information".to_string()),
         Expr::Constant(value) => Ok(match value {
             Value::F32(_) => TypeInfo::F32, Value::F64(_) => TypeInfo::F64,
             Value::I8(_) => TypeInfo::I8, Value::I16(_) => TypeInfo::I16, Value::I32(_) => TypeInfo::I32, Value::I64(_) => TypeInfo::I64, Value::I128(_) => TypeInfo::I128,
