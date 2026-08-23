@@ -115,7 +115,9 @@ fn expand_compile_closure(
                                 ::type_info(),
 
                         body:
-                            #expression,
+                            ::closure_llvm::Block::expression(
+                                #expression
+                            ),
                     };
 
 
