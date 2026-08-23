@@ -1,46 +1,25 @@
 use inkwell::{builder::Builder, context::Context, values::{BasicValueEnum, FunctionValue, PointerValue}};
 use crate::{compiler::llvm_type, expr::{Block, Expr, Statement}, lowering::{LoweredValue, Lowering}, types::TypeInfo};
 
-pub(crate) fn lower_closure_block<'ctx>(
-    context: &'ctx Context,
-    builder: &Builder<'ctx>,
-    function: FunctionValue<'ctx>,
-    arguments: &[PointerValue<'ctx>],
-    argument_types: &[TypeInfo],
-    return_type: &TypeInfo,
-    block: &Block,
-) -> Result<BasicValueEnum<'ctx>, String> {
+pub(crate) fn lower_closure_block<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: FunctionValue<'ctx>, arguments: &[PointerValue<'ctx>], argument_types: &[TypeInfo], return_type: &TypeInfo, block: &Block) -> Result<BasicValueEnum<'ctx>, String> {
     let lowering = Lowering;
     let (_, _, value) = lower_block(context, builder, function, arguments, argument_types, argument_types.len(), block, Some(return_type))?;
     let value = value.ok_or_else(|| "closure block has no result expression".to_string())?;
     let value = lowering.materialize_value(context, builder, value)?;
-    if value.get_type() != llvm_type(context, return_type)? {
-        return Err("closure result type does not match declared return type".to_string());
-    }
+    if value.get_type() != llvm_type(context, return_type)? { return Err("closure result type does not match declared return type".to_string()); }
     Ok(value)
 }
 
-fn lower_block<'ctx>(
-    context: &'ctx Context,
-    builder: &Builder<'ctx>,
-    function: FunctionValue<'ctx>,
-    arguments: &[PointerValue<'ctx>],
-    argument_types: &[TypeInfo],
-    argument_count: usize,
-    block: &Block,
-    expected_result_type: Option<&TypeInfo>,
-) -> Result<(Vec<PointerValue<'ctx>>, Vec<TypeInfo>, Option<LoweredValue<'ctx>>), String> {
+fn lower_block<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: FunctionValue<'ctx>, arguments: &[PointerValue<'ctx>], argument_types: &[TypeInfo], argument_count: usize, block: &Block, expected_result_type: Option<&TypeInfo>) -> Result<(Vec<PointerValue<'ctx>>, Vec<TypeInfo>, Option<LoweredValue<'ctx>>), String> {
     let lowering = Lowering;
     let mut pointers = arguments.to_vec();
     let mut types = argument_types.to_vec();
-
     for statement in &block.statements {
         match statement {
             Statement::Let { local, type_info, value, .. } => {
                 let expected_local = pointers.len().saturating_sub(argument_count);
                 if *local != expected_local { return Err(format!("invalid local index {}", local)); }
-                let pointer = builder.build_alloca(llvm_type(context, type_info)?, &format!("local_{}", local))
-                    .map_err(|error| format!("failed to allocate local {}: {:?}", local, error))?;
+                let pointer = builder.build_alloca(llvm_type(context, type_info)?, &format!("local_{}", local)).map_err(|error| format!("failed to allocate local {}: {:?}", local, error))?;
                 let value = lowering.lower_expr(context, builder, function, &pointers, &types, type_info, value)?;
                 let value = lowering.materialize_value(context, builder, value)?;
                 builder.build_store(pointer, value).map_err(|error| format!("failed to initialize local {}: {:?}", local, error))?;
@@ -55,17 +34,10 @@ fn lower_block<'ctx>(
                 let value = lowering.materialize_value(context, builder, value)?;
                 builder.build_store(pointer, value).map_err(|error| format!("failed to assign local {}: {:?}", local, error))?;
             }
-            Statement::While { condition, body } => {
-                lower_while(context, builder, function, &lowering, &pointers, &types, argument_count, condition, body)?;
-            }
-            Statement::For { local, type_info, start, end, inclusive, body } => {
-                lower_for(context, builder, function, &lowering, &pointers, &types, argument_count, *local, type_info, start, end, *inclusive, body)?;
-                pointers.push(builder.build_alloca(llvm_type(context, type_info)?, &format!("for_scope_{}", local)).map_err(|error| format!("failed to reserve for local {}: {:?}", local, error))?);
-                types.push(type_info.clone());
-            }
+            Statement::While { condition, body } => lower_while(context, builder, function, &lowering, &pointers, &types, argument_count, condition, body)?,
+            Statement::For { local, type_info, start, end, inclusive, body } => lower_for(context, builder, function, &lowering, &pointers, &types, argument_count, *local, type_info, start, end, *inclusive, body)?,
         }
     }
-
     let result = match (&block.result, expected_result_type) {
         (Some(expr), Some(type_info)) => Some(lowering.lower_expr(context, builder, function, &pointers, &types, type_info, expr)?),
         (Some(_), None) => return Err("block result has no expected type".to_string()),
@@ -102,7 +74,6 @@ fn lower_for<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: Fu
     let mut loop_types = types.to_vec();
     loop_pointers.push(pointer);
     loop_types.push(type_info.clone());
-
     let condition_block = context.append_basic_block(function, "for_condition");
     let body_block = context.append_basic_block(function, "for_body");
     let increment_block = context.append_basic_block(function, "for_increment");
@@ -113,12 +84,8 @@ fn lower_for<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: Fu
     let end_value = lowering.lower_expr(context, builder, function, pointers, types, type_info, end)?;
     let end_value = lowering.materialize_value(context, builder, end_value)?;
     let condition = match (current, end_value) {
-        (BasicValueEnum::IntValue(current), BasicValueEnum::IntValue(end_value)) => {
-            if inclusive { builder.build_int_compare(inkwell::IntPredicate::SLE, current, end_value, "for_cmp") } else { builder.build_int_compare(inkwell::IntPredicate::SLT, current, end_value, "for_cmp") }
-        }
-        (BasicValueEnum::FloatValue(current), BasicValueEnum::FloatValue(end_value)) => {
-            if inclusive { builder.build_float_compare(inkwell::FloatPredicate::OLE, current, end_value, "for_cmp") } else { builder.build_float_compare(inkwell::FloatPredicate::OLT, current, end_value, "for_cmp") }
-        }
+        (BasicValueEnum::IntValue(current), BasicValueEnum::IntValue(end_value)) => if inclusive { builder.build_int_compare(inkwell::IntPredicate::SLT, current, end_value, "for_cmp") } else { builder.build_int_compare(inkwell::IntPredicate::SLT, current, end_value, "for_cmp") },
+        (BasicValueEnum::FloatValue(current), BasicValueEnum::FloatValue(end_value)) => if inclusive { builder.build_float_compare(inkwell::FloatPredicate::OLT, current, end_value, "for_cmp") } else { builder.build_float_compare(inkwell::FloatPredicate::OLT, current, end_value, "for_cmp") },
         _ => return Err("for range bounds must have matching numeric types".to_string()),
     }.map_err(|error| format!("failed to compare for bounds: {:?}", error))?;
     builder.build_conditional_branch(condition, body_block, exit_block).map_err(|error| format!("failed to branch for loop: {:?}", error))?;
@@ -128,16 +95,8 @@ fn lower_for<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: Fu
     if body_end.get_terminator().is_none() { builder.build_unconditional_branch(increment_block).map_err(|error| format!("failed to enter for increment: {:?}", error))?; }
     builder.position_at_end(increment_block);
     let current = builder.build_load(llvm_type(context, type_info)?, pointer, "for_increment_value").map_err(|error| format!("failed to load for increment value: {:?}", error))?;
-    let one = match llvm_type(context, type_info)? {
-        inkwell::types::BasicTypeEnum::IntType(ty) => ty.const_int(1, false).into(),
-        inkwell::types::BasicTypeEnum::FloatType(ty) => ty.const_float(1.0).into(),
-        _ => return Err("for loops require numeric range types".to_string()),
-    };
-    let next = match (current, one) {
-        (BasicValueEnum::IntValue(current), BasicValueEnum::IntValue(one)) => builder.build_int_add(current, one, "for_next").map(Into::into),
-        (BasicValueEnum::FloatValue(current), BasicValueEnum::FloatValue(one)) => builder.build_float_add(current, one, "for_next").map(Into::into),
-        _ => return Err("for loop increment type mismatch".to_string()),
-    }.map_err(|error| format!("failed to increment for loop: {:?}", error))?;
+    let one = match llvm_type(context, type_info)? { inkwell::types::BasicTypeEnum::IntType(ty) => ty.const_int(1, false).into(), inkwell::types::BasicTypeEnum::FloatType(ty) => ty.const_float(1.0).into(), _ => return Err("for loops require numeric range types".to_string()) };
+    let next = match (current, one) { (BasicValueEnum::IntValue(current), BasicValueEnum::IntValue(one)) => builder.build_int_add(current, one, "for_next").map(Into::into), (BasicValueEnum::FloatValue(current), BasicValueEnum::FloatValue(one)) => builder.build_float_add(current, one, "for_next").map(Into::into), _ => return Err("for loop increment type mismatch".to_string()) }.map_err(|error| format!("failed to increment for loop: {:?}", error))?;
     builder.build_store(pointer, next).map_err(|error| format!("failed to store for increment: {:?}", error))?;
     builder.build_unconditional_branch(condition_block).map_err(|error| format!("failed to loop back for condition: {:?}", error))?;
     builder.position_at_end(exit_block);
