@@ -1,4 +1,4 @@
-use closure_llvm::{call, compile_closure, quote_closure, CompileType};
+use closure_ir::{call, compile_closure, quote_closure, CompileType};
 
 #[cfg(test)]
 mod tests {
