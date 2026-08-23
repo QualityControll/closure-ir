@@ -3,14 +3,14 @@ use closure_llvm::{call, compile_closure, quote_closure, CompileType};
 #[cfg(test)]
 mod tests {
 
-use super::*;
+    use super::*;
 
     // ============================================================
     // Multiple arguments
     // ============================================================
     #[test]
     fn test_four_arguments_add() {
-        let compiled = compile_closure!(|w: i32, x: i32, y: i32, z: i32| -> i32 { w + x + y + z});
+        let compiled = compile_closure!(|w: i32, x: i32, y: i32, z: i32| -> i32 { w + x + y + z });
 
         assert_eq!(call!(compiled, 2, 3, 4, 5), 14);
     }
@@ -53,9 +53,7 @@ use super::*;
 
     #[test]
     fn test_zero_arguments() {
-        let compiled = compile_closure!(|| -> i32 {
-            100
-        });
+        let compiled = compile_closure!(|| -> i32 { 100 });
 
         assert_eq!(call!(compiled), 100);
     }
@@ -606,12 +604,11 @@ use super::*;
         bottom_right: Point,
     }
 
-
-     #[repr(C)]
+    #[repr(C)]
     #[derive(Debug, Clone, Copy, CompileType)]
     struct Nested {
         r: Rectangle,
-        p: Point
+        p: Point,
     }
 
     #[repr(C)]
@@ -622,10 +619,7 @@ use super::*;
     fn test_returned_tuple_struct() {
         let compiled = compile_closure!(|n: Point2| -> Point2 { n });
 
-        let tup= Point2 {
-            0: true,
-            1: 10
-        };
+        let tup = Point2 { 0: true, 1: 10 };
 
         assert_eq!(call!(compiled, tup), Point2 { 0: true, 1: 10 });
     }
@@ -641,9 +635,7 @@ use super::*;
 
     #[test]
     fn test_tuple_value() {
-        let compiled = compile_closure!(|x: i32, y: i32| -> (i32, i32) { 
-            (x, y)
-        });
+        let compiled = compile_closure!(|x: i32, y: i32| -> (i32, i32) { (x, y) });
 
         assert_eq!(call!(compiled, 40, 10), (40, 10));
     }
@@ -652,14 +644,16 @@ use super::*;
     fn test_nested_struct() {
         let compiled = compile_closure!(|n: Nested| -> f64 { n.r.bottom_right.x - n.p.x });
 
-        let nested = Nested { r: Rectangle {
-            top_left: Point { x: 10.0, y: 20.0 },
-            bottom_right: Point { x: 30.0, y: 40.0 },
-        }, p: Point { x: 10.0, y: 5.0 }};
+        let nested = Nested {
+            r: Rectangle {
+                top_left: Point { x: 10.0, y: 20.0 },
+                bottom_right: Point { x: 30.0, y: 40.0 },
+            },
+            p: Point { x: 10.0, y: 5.0 },
+        };
 
         assert_eq!(call!(compiled, nested), 20.0);
     }
-
 
     #[test]
     fn test_struct_field_arithmetic() {
@@ -675,27 +669,40 @@ use super::*;
     }
 
     #[test]
-    fn test_serialization() {
-        let expr = quote_closure!(|x: i32| -> i32 {
-            x
-        });
+    fn dynamic_invocation_add_i32() {
+        let closure = quote_closure!(|x: i32, y: i32| -> i32 { x + y });
 
-        let serialized = 
-            serde_json::to_string(&expr).unwrap();
+        let context = inkwell::context::Context::create();
+
+        let compiler = closure_llvm::Compiler::new(&context);
+
+        let compiled = compiler
+            .compile_dynamic(&closure)
+            .expect("failed to compile closure");
+
+        let result = unsafe { compiled
+            .call(&[closure_llvm::Value::I32(10), closure_llvm::Value::I32(20)])
+            .expect("failed to invoke closure") };
+
+        assert_eq!(result, closure_llvm::Value::I32(30));
+    }
+
+    #[test]
+    fn test_serialization() {
+        let expr = quote_closure!(|x: i32| -> i32 { x });
+
+        let serialized = serde_json::to_string(&expr).unwrap();
 
         println!("serialized expr is {}", serialized);
 
-        let deserialized = 
-            serde_json::from_str(&serialized).unwrap();
+        let deserialized = serde_json::from_str(&serialized).unwrap();
 
         assert_eq!(expr, deserialized);
     }
 
     #[test]
     fn print_quoted_expr() {
-        let expr = quote_closure!(|x: i32| -> i32 {
-            x
-        });
+        let expr = quote_closure!(|x: i32| -> i32 { x });
 
         println!("expr is {:?}", expr);
     }
