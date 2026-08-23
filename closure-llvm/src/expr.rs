@@ -3,39 +3,24 @@ use crate::value::Value;
 
 use serde::{Deserialize, Serialize};
 
-
-// ============================================================
-// Expression IR
-// ============================================================
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Expr {
     Argument(usize),
-
+    Local(usize),
     Constant(Value),
-
-    Field {
-        object: Box<Expr>,
-        name: String,
-    },
-
-    Tuple {
-        elements: Vec<Expr>,
-    },
-
+    Field { object: Box<Expr>, name: String },
+    Tuple { elements: Vec<Expr> },
     Add { lhs: Box<Expr>, rhs: Box<Expr> },
     Sub { lhs: Box<Expr>, rhs: Box<Expr> },
     Mul { lhs: Box<Expr>, rhs: Box<Expr> },
     Div { lhs: Box<Expr>, rhs: Box<Expr> },
     Rem { lhs: Box<Expr>, rhs: Box<Expr> },
-
     Eq { lhs: Box<Expr>, rhs: Box<Expr> },
     Ne { lhs: Box<Expr>, rhs: Box<Expr> },
     Lt { lhs: Box<Expr>, rhs: Box<Expr> },
     Le { lhs: Box<Expr>, rhs: Box<Expr> },
     Gt { lhs: Box<Expr>, rhs: Box<Expr> },
     Ge { lhs: Box<Expr>, rhs: Box<Expr> },
-
     And { lhs: Box<Expr>, rhs: Box<Expr> },
     Or { lhs: Box<Expr>, rhs: Box<Expr> },
     BitAnd { lhs: Box<Expr>, rhs: Box<Expr> },
@@ -43,65 +28,33 @@ pub enum Expr {
     BitXor { lhs: Box<Expr>, rhs: Box<Expr> },
     Shl { lhs: Box<Expr>, rhs: Box<Expr> },
     Shr { lhs: Box<Expr>, rhs: Box<Expr> },
-
     Not { operand: Box<Expr> },
     Neg { operand: Box<Expr> },
-
-    IfElse {
-        condition: Box<Expr>,
-        then_branch: Box<Expr>,
-        else_branch: Box<Expr>,
-    },
+    IfElse { condition: Box<Expr>, then_branch: Box<Expr>, else_branch: Box<Expr> },
 }
-
-
-// ============================================================
-// Statement IR
-// ============================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Statement {
-    Let {
-        local: usize,
-        value: Expr,
-        mutable: bool,
-    },
-
-    Assign {
-        local: usize,
-        value: Expr,
-    },
-
-    While {
-        condition: Expr,
-        body: Block,
-    },
+    Let { local: usize, type_info: TypeInfo, value: Expr, mutable: bool },
+    Assign { local: usize, value: Expr },
+    While { condition: Expr, body: Block },
 }
-
-
-// ============================================================
-// Block IR
-// ============================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Block {
     pub statements: Vec<Statement>,
-    pub result: Expr,
+    pub result: Option<Expr>,
 }
 
 impl Block {
     pub fn expression(result: Expr) -> Self {
-        Self {
-            statements: Vec::new(),
-            result,
-        }
+        Self { statements: Vec::new(), result: Some(result) }
+    }
+
+    pub fn statements(statements: Vec<Statement>) -> Self {
+        Self { statements, result: None }
     }
 }
-
-
-// ============================================================
-// Closure description
-// ============================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Closure {
