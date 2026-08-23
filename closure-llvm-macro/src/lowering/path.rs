@@ -6,10 +6,7 @@ use syn::ExprPath;
 
 use crate::parser::ClosureArgument;
 
-use super::expression::{
-    lower_expr,
-    LocalVariable,
-};
+use super::expression::LocalVariable;
 
 
 // ============================================================
@@ -20,7 +17,7 @@ pub(crate) fn lower_path(
     path: &ExprPath,
     arguments: &[ClosureArgument],
     locals: &[LocalVariable],
-    expected_type: Option<&syn::Type>,
+    _expected_type: Option<&syn::Type>,
 ) -> syn::Result<TokenStream> {
     if path.path.segments.len() != 1 {
         return Err(
