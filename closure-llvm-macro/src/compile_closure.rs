@@ -46,10 +46,14 @@ fn expand_compile_closure(
     } = input;
 
 
+    let locals =
+        Vec::new();
+
     let expression =
         lower_block(
             &body.block,
             &arguments,
+            &locals,
             None,
         )?;
 
