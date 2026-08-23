@@ -45,14 +45,16 @@ fn expand_quote_closure(
         body,
     } = input;
 
+    let locals =
+        Vec::new();
 
     let expression =
         lower_block(
             &body.block,
             &arguments,
+            &locals,
             None,
         )?;
-
 
     let argument_type_infos =
         arguments
@@ -68,7 +70,6 @@ fn expand_quote_closure(
                 }
             })
             .collect::<Vec<_>>();
-
 
     Ok(
         quote! {
