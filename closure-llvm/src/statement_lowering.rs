@@ -66,6 +66,7 @@ fn lower_while<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: 
 }
 
 fn lower_for<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: FunctionValue<'ctx>, lowering: &Lowering, pointers: &[PointerValue<'ctx>], types: &[TypeInfo], argument_count: usize, local: usize, type_info: &TypeInfo, start: &Expr, end: &Expr, inclusive: bool, body: &Block) -> Result<(), String> {
+    if !type_info.is_numeric() || type_info.is_bool() { return Err("for loops require numeric range types".to_string()); }
     let pointer = builder.build_alloca(llvm_type(context, type_info)?, &format!("for_local_{}", local)).map_err(|error| format!("failed to allocate for local {}: {:?}", local, error))?;
     let start = lowering.lower_expr(context, builder, function, pointers, types, type_info, start)?;
     let start = lowering.materialize_value(context, builder, start)?;
@@ -84,8 +85,14 @@ fn lower_for<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: Fu
     let end_value = lowering.lower_expr(context, builder, function, pointers, types, type_info, end)?;
     let end_value = lowering.materialize_value(context, builder, end_value)?;
     let condition = match (current, end_value) {
-        (BasicValueEnum::IntValue(current), BasicValueEnum::IntValue(end_value)) => if inclusive { builder.build_int_compare(inkwell::IntPredicate::SLT, current, end_value, "for_cmp") } else { builder.build_int_compare(inkwell::IntPredicate::SLT, current, end_value, "for_cmp") },
-        (BasicValueEnum::FloatValue(current), BasicValueEnum::FloatValue(end_value)) => if inclusive { builder.build_float_compare(inkwell::FloatPredicate::OLT, current, end_value, "for_cmp") } else { builder.build_float_compare(inkwell::FloatPredicate::OLT, current, end_value, "for_cmp") },
+        (BasicValueEnum::IntValue(current), BasicValueEnum::IntValue(end_value)) => {
+            let predicate = if type_info.is_unsigned_integer() { if inclusive { inkwell::IntPredicate::ULE } else { inkwell::IntPredicate::ULT } } else { if inclusive { inkwell::IntPredicate::SLE } else { inkwell::IntPredicate::SLT } };
+            builder.build_int_compare(predicate, current, end_value, "for_cmp")
+        }
+        (BasicValueEnum::FloatValue(current), BasicValueEnum::FloatValue(end_value)) => {
+            let predicate = if inclusive { inkwell::FloatPredicate::OLE } else { inkwell::FloatPredicate::OLT };
+            builder.build_float_compare(predicate, current, end_value, "for_cmp")
+        }
         _ => return Err("for range bounds must have matching numeric types".to_string()),
     }.map_err(|error| format!("failed to compare for bounds: {:?}", error))?;
     builder.build_conditional_branch(condition, body_block, exit_block).map_err(|error| format!("failed to branch for loop: {:?}", error))?;
