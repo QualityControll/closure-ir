@@ -27,6 +27,7 @@ pub(crate) struct LocalVariable {
     pub(crate) name: syn::Ident,
     pub(crate) value: TokenStream,
     pub(crate) type_info: Option<Type>,
+    pub(crate) mutable: bool,
 }
 
 

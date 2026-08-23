@@ -1,6 +1,7 @@
 use proc_macro2::TokenStream;
 
 use syn::{
+    ExprAssign,
     Pat,
     Stmt,
     Type,
@@ -51,15 +52,26 @@ fn lower_stmts(
 
     match statement {
         Stmt::Local(local) => {
-            let name =
+            let (name, mutable, explicit_type) =
                 match &local.pat {
                     Pat::Ident(pattern) =>
-                        pattern.ident.clone(),
+                        (
+                            pattern.ident.clone(),
+                            pattern.mutability.is_some(),
+                            None,
+                        ),
 
-                    Pat::Type(pattern) =>
+                    Pat::Type(pattern) => {
+                        let explicit_type =
+                            (*pattern.ty).clone();
+
                         match &*pattern.pat {
                             Pat::Ident(pattern) =>
-                                pattern.ident.clone(),
+                                (
+                                    pattern.ident.clone(),
+                                    pattern.mutability.is_some(),
+                                    Some(explicit_type),
+                                ),
 
                             _ =>
                                 return Err(
@@ -68,7 +80,8 @@ fn lower_stmts(
                                         "let bindings must use identifiers",
                                     )
                                 ),
-                        },
+                        }
+                    }
 
                     _ =>
                         return Err(
@@ -91,17 +104,14 @@ fn lower_stmts(
                     })?;
 
             let local_type =
-                match &local.pat {
-                    Pat::Type(pattern) =>
-                        Some((*pattern.ty).clone()),
-
-                    _ =>
+                explicit_type
+                    .or_else(|| {
                         expression_type(
                             &initializer.expr,
                             arguments,
                             locals,
-                        ),
-                };
+                        )
+                    });
 
             let value =
                 lower_expr(
@@ -119,6 +129,7 @@ fn lower_stmts(
                     name,
                     value,
                     type_info: local_type,
+                    mutable,
                 }
             );
 
@@ -131,20 +142,36 @@ fn lower_stmts(
         }
 
         Stmt::Expr(expr, _) => {
-            if statements.len() != 1 {
-                return Err(
-                    syn::Error::new_spanned(
-                        &statements[1],
-                        "only let bindings may precede the final expression",
-                    )
+            if statements.len() == 1 {
+                return lower_expr(
+                    expr,
+                    arguments,
+                    locals,
+                    expected_type,
                 );
             }
 
-            lower_expr(
-                expr,
-                arguments,
-                locals,
-                expected_type,
+            if let syn::Expr::Assign(assign) = expr {
+                let next_locals =
+                    lower_assignment(
+                        assign,
+                        arguments,
+                        locals,
+                    )?;
+
+                return lower_stmts(
+                    &statements[1..],
+                    arguments,
+                    &next_locals,
+                    expected_type,
+                );
+            }
+
+            Err(
+                syn::Error::new_spanned(
+                    &statements[1],
+                    "only let bindings and assignments may precede the final expression",
+                )
             )
         }
 
@@ -152,8 +179,76 @@ fn lower_stmts(
             Err(
                 syn::Error::new_spanned(
                     other,
-                    "only let bindings and a final expression are supported",
+                    "only let bindings, assignments, and a final expression are supported",
                 )
             ),
     }
+}
+
+
+fn lower_assignment(
+    assign: &ExprAssign,
+    arguments: &[ClosureArgument],
+    locals: &[LocalVariable],
+) -> syn::Result<Vec<LocalVariable>> {
+    let name =
+        match &*assign.left {
+            syn::Expr::Path(path)
+                if path.path.segments.len() == 1 =>
+            {
+                path.path.segments[0].ident.clone()
+            }
+
+            _ =>
+                return Err(
+                    syn::Error::new_spanned(
+                        &assign.left,
+                        "assignment targets must be local variables",
+                    )
+                ),
+        };
+
+    let index =
+        locals
+            .iter()
+            .rposition(|local| &local.name == &name)
+            .ok_or_else(|| {
+                syn::Error::new_spanned(
+                    &assign.left,
+                    format!(
+                        "unknown local variable `{}`",
+                        name
+                    ),
+                )
+            })?;
+
+    if !locals[index].mutable {
+        return Err(
+            syn::Error::new_spanned(
+                &assign.left,
+                format!(
+                    "cannot assign to immutable variable `{}`",
+                    name
+                ),
+            )
+        );
+    }
+
+    let expected_type =
+        locals[index].type_info.as_ref();
+
+    let value =
+        lower_expr(
+            &assign.right,
+            arguments,
+            locals,
+            expected_type,
+        )?;
+
+    let mut next_locals =
+        locals.to_vec();
+
+    next_locals[index].value = value;
+
+    Ok(next_locals)
 }
