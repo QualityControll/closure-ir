@@ -8,7 +8,7 @@ use serde::{Serialize, Deserialize};
 // Expression IR
 // ============================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Expr {
     Argument(usize),
 
@@ -133,7 +133,7 @@ pub enum Expr {
 // Closure description
 // ============================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Closure {
     pub arguments: Vec<TypeInfo>,
     pub return_type: TypeInfo,

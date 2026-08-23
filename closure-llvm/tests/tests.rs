@@ -675,6 +675,23 @@ use super::*;
     }
 
     #[test]
+    fn test_serialization() {
+        let expr = quote_closure!(|x: i32| -> i32 {
+            x
+        });
+
+        let serialized = 
+            serde_json::to_string(&expr).unwrap();
+
+        println!("serialized expr is {}", serialized);
+
+        let deserialized = 
+            serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(expr, deserialized);
+    }
+
+    #[test]
     fn print_quoted_expr() {
         let expr = quote_closure!(|x: i32| -> i32 {
             x
