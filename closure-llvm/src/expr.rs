@@ -6,7 +6,7 @@ use crate::value::Value;
 // Expression IR
 // ============================================================
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expr {
     Argument(usize),
 
@@ -131,6 +131,7 @@ pub enum Expr {
 // Closure description
 // ============================================================
 
+#[derive(Debug, Clone)]
 pub struct Closure {
     pub arguments: Vec<TypeInfo>,
     pub return_type: TypeInfo,

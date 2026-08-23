@@ -1,6 +1,7 @@
 use closure_llvm::{
     call,
     compile_closure,
+    quote_closure,
     CompileType,
 };
 
@@ -36,6 +37,16 @@ struct Point {
 struct Rectangle {
     top_left: Point,
     bottom_right: Point,
+}
+
+
+fn quote_expr() {
+    let expr = quote_closure!(|x: i32| -> bool {
+        true
+    });
+
+    println!("quoted expression: {:?}", expr);
+
 }
 
 
@@ -115,4 +126,8 @@ fn main() {
         result,
         40.0
     );
+
+    //print the expression that is generated from a helper macro
+    quote_expr();
+
 }

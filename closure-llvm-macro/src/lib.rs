@@ -53,6 +53,31 @@ pub fn derive_closure_type(
 
 
 // ============================================================
+// quote_closure!
+// ============================================================
+
+#[proc_macro]
+pub fn quote_closure(
+    input: TokenStream,
+) -> TokenStream {
+    let input =
+        parse_macro_input!(
+            input as ClosureInput
+        );
+
+    match expand_quote_closure(input) {
+        Ok(tokens) =>
+            tokens.into(),
+
+        Err(error) =>
+            error
+                .into_compile_error()
+                .into(),
+    }
+}
+
+
+// ============================================================
 // compile_closure!
 // ============================================================
 
@@ -464,6 +489,66 @@ impl syn::parse::Parse for CallInput {
             values,
         })
     }
+}
+
+
+// ============================================================
+// Expand quote_closure!
+// ============================================================
+
+fn expand_quote_closure(
+    input: ClosureInput,
+) -> syn::Result<proc_macro2::TokenStream> {
+    let ClosureInput {
+        arguments,
+        return_type,
+        body,
+    } = input;
+
+    let expression =
+        lower_block(
+            &body.block,
+            &arguments,
+            None,
+        )?;
+
+
+    let argument_type_infos =
+        arguments
+            .iter()
+            .map(|argument| {
+                let ty =
+                    &argument.type_info;
+
+                quote! {
+                    <#ty as
+                        ::closure_llvm::CompileType>
+                        ::type_info()
+                }
+            })
+            .collect::<Vec<_>>();
+
+
+    Ok(
+        quote! {
+            ::closure_llvm::Closure {
+                arguments:
+                    vec![
+                        #(
+                            #argument_type_infos
+                        ),*
+                    ],
+
+                return_type:
+                    <#return_type as
+                        ::closure_llvm::CompileType>
+                        ::type_info(),
+
+                body:
+                    #expression,
+            }
+        }
+    )
 }
 
 

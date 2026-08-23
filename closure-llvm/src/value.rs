@@ -2,7 +2,7 @@
 // Runtime values
 // ============================================================
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Value {
     F32(f32),
     F64(f64),

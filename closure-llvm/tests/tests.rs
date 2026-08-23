@@ -1,8 +1,9 @@
-use closure_llvm::{call, compile_closure, CompileType};
+use closure_llvm::{call, compile_closure, quote_closure, CompileType};
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+
+use super::*;
 
     // ============================================================
     // Multiple arguments
@@ -671,5 +672,14 @@ mod tests {
         };
 
         assert_eq!(call!(compiled, rectangle), 20.0);
+    }
+
+    #[test]
+    fn print_quoted_expr() {
+        let expr = quote_closure!(|x: i32| -> i32 {
+            x
+        });
+
+        println!("expr is {:?}", expr);
     }
 }

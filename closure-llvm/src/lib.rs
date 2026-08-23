@@ -15,5 +15,6 @@ pub use value::Value;
 pub use closure_llvm_macro::{
     call,
     compile_closure,
+    quote_closure,
     CompileType,
 };
