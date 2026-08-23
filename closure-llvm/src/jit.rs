@@ -27,18 +27,18 @@ fn value_to_bytes(
             Ok(buffer)
         }
 
-        Value::I8(value) => scalar_to_buffer(*value),
-        Value::I16(value) => scalar_to_buffer(*value),
-        Value::I32(value) => scalar_to_buffer(*value),
-        Value::I64(value) => scalar_to_buffer(*value),
-        Value::I128(value) => scalar_to_buffer(*value),
-        Value::U8(value) => scalar_to_buffer(*value),
-        Value::U16(value) => scalar_to_buffer(*value),
-        Value::U32(value) => scalar_to_buffer(*value),
-        Value::U64(value) => scalar_to_buffer(*value),
-        Value::U128(value) => scalar_to_buffer(*value),
-        Value::F32(value) => scalar_to_buffer(*value),
-        Value::F64(value) => scalar_to_buffer(*value),
+        Value::I8(value) => Ok(scalar_to_buffer(*value)),
+        Value::I16(value) => Ok(scalar_to_buffer(*value)),
+        Value::I32(value) => Ok(scalar_to_buffer(*value)),
+        Value::I64(value) => Ok(scalar_to_buffer(*value)),
+        Value::I128(value) => Ok(scalar_to_buffer(*value)),
+        Value::U8(value) => Ok(scalar_to_buffer(*value)),
+        Value::U16(value) => Ok(scalar_to_buffer(*value)),
+        Value::U32(value) => Ok(scalar_to_buffer(*value)),
+        Value::U64(value) => Ok(scalar_to_buffer(*value)),
+        Value::U128(value) => Ok(scalar_to_buffer(*value)),
+        Value::F32(value) => Ok(scalar_to_buffer(*value)),
+        Value::F64(value) => Ok(scalar_to_buffer(*value)),
     }
 }
 
