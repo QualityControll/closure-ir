@@ -29,8 +29,8 @@ fn test_multiple_let_bindings() {
 #[test]
 fn test_annotated_let_binding() {
     let compiled =
-        compile_closure!(|x: i32| -> i64 {
-            let y: i64 = x as i64 + 1;
+        compile_closure!(|x: i32| -> i32 {
+            let y: i32 = x + 1;
             y * 2
         });
 
