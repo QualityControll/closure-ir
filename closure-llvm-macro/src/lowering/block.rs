@@ -66,8 +66,13 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
         return Err(syn::Error::new(proc_macro2::Span::call_site(), "closure block must end with an expression"));
     }
 
+    let result_tokens = match result {
+        Some(result) => quote! { Some(#result) },
+        None => quote! { None },
+    };
+
     Ok(quote! {
-        ::closure_llvm::Block { statements: vec![#(#statement_tokens),*], result: #result }
+        ::closure_llvm::Block { statements: vec![#(#statement_tokens),*], result: #result_tokens }
     })
 }
 
