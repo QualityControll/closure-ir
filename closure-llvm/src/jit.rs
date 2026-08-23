@@ -5,34 +5,47 @@ use inkwell::{
     execution_engine::ExecutionEngine,
 };
 
-use crate::types::CompileType;
+use crate::{
+    types::{
+        CompileType,
+        TypeInfo,
+    },
+};
 
 
 // ============================================================
-// Compiled closure
+// Typed compiled closure
 // ============================================================
 
 pub struct CompiledClosure<'ctx, Args, Ret> {
-    pub(crate) engine: ExecutionEngine<'ctx>,
-    pub(crate) function_name: String,
+    pub(crate) engine:
+        ExecutionEngine<'ctx>,
+
+    pub(crate) function_name:
+        String,
 
     pub(crate) _marker:
         PhantomData<fn(Args) -> Ret>,
 }
 
 
-impl<'ctx, Args, Ret> CompiledClosure<'ctx, Args, Ret>
+impl<'ctx, Args, Ret>
+    CompiledClosure<'ctx, Args, Ret>
 where
     Args: CompileType,
     Ret: CompileType + 'static,
 {
     pub(crate) fn new(
-        engine: ExecutionEngine<'ctx>,
-        function_name: String,
+        engine:
+            ExecutionEngine<'ctx>,
+
+        function_name:
+            String,
     ) -> Self {
         Self {
             engine,
             function_name,
+
             _marker:
                 PhantomData,
         }
@@ -47,6 +60,115 @@ where
             &self.engine,
             &self.function_name,
             value,
+        )
+    }
+}
+
+
+// ============================================================
+// Dynamic compiled closure
+//
+// This is used when a Closure has been deserialized.
+//
+// Unlike CompiledClosure<Args, Ret>, this type does not need
+// Rust generic Args/Ret types.
+//
+// The Closure itself contains:
+//
+//     arguments: Vec<TypeInfo>
+//     return_type: TypeInfo
+//     body: Expr
+//
+// Those are sufficient for LLVM compilation.
+//
+// Runtime invocation will be added separately once we define
+// the runtime Value -> memory ABI.
+// ============================================================
+#[allow(dead_code)]
+pub struct DynamicCompiledClosure<'ctx> {
+    pub(crate) engine:
+        ExecutionEngine<'ctx>,
+
+    pub(crate) function_name:
+        String,
+
+    pub(crate) arguments:
+        Vec<TypeInfo>,
+
+    pub(crate) return_type:
+        TypeInfo,
+}
+
+
+impl<'ctx>
+    DynamicCompiledClosure<'ctx>
+{
+    pub(crate) fn new(
+        engine:
+            ExecutionEngine<'ctx>,
+
+        function_name:
+            String,
+
+        arguments:
+            Vec<TypeInfo>,
+
+        return_type:
+            TypeInfo,
+    ) -> Self {
+        Self {
+            engine,
+            function_name,
+            arguments,
+            return_type,
+        }
+    }
+
+
+    // ========================================================
+    // Accessors
+    // ========================================================
+
+    pub fn arguments(
+        &self,
+    ) -> &[TypeInfo] {
+        &self.arguments
+    }
+
+
+    pub fn return_type(
+        &self,
+    ) -> &TypeInfo {
+        &self.return_type
+    }
+
+
+    // ========================================================
+    // Runtime invocation
+    //
+    // Not implemented yet.
+    //
+    // The LLVM function has the ABI:
+    //
+    //     void compiled_closure(
+    //         ptr args,
+    //         ptr result
+    //     )
+    //
+    // Before implementing this method, we need to define the
+    // stable runtime memory representation for Value.
+    // ========================================================
+
+    pub unsafe fn call(
+        &self,
+        _arguments: &[crate::value::Value],
+    ) -> Result<
+        crate::value::Value,
+        String,
+    > {
+        Err(
+            "dynamic JIT invocation is not implemented yet"
+                .to_string()
         )
     }
 }
@@ -84,9 +206,14 @@ where
 // ============================================================
 
 unsafe fn jit_call<Args, Ret>(
-    engine: &ExecutionEngine<'_>,
-    function_name: &str,
-    value: &Args,
+    engine:
+        &ExecutionEngine<'_>,
+
+    function_name:
+        &str,
+
+    value:
+        &Args,
 ) -> Ret
 where
     Args: CompileType,
@@ -114,8 +241,11 @@ where
 
 
     function.call(
-        value as *const Args as *const u8,
-        result.as_mut_ptr() as *mut u8,
+        value as *const Args
+            as *const u8,
+
+        result.as_mut_ptr()
+            as *mut u8,
     );
 
 

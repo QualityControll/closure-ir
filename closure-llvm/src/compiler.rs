@@ -10,7 +10,10 @@ use inkwell::{
 
 use crate::{
     expr::Closure,
-    jit::CompiledClosure,
+    jit::{
+        CompiledClosure,
+        DynamicCompiledClosure,
+    },
     lowering::Lowering,
     types::{
         CompileType,
@@ -39,7 +42,13 @@ impl<'ctx> Compiler<'ctx> {
     }
 
 
-    pub fn compile<Args, Ret>(
+    // ========================================================
+    // Typed compilation
+    //
+    // Used by compile_closure! and the statically typed API.
+    // ========================================================
+
+    pub fn compile_typed<Args, Ret>(
         &self,
         closure: &Closure,
     ) -> Result<
@@ -97,6 +106,82 @@ impl<'ctx> Compiler<'ctx> {
             CompiledClosure::new(
                 engine,
                 function_name.to_string(),
+            )
+        )
+    }
+
+
+    // ========================================================
+    // Dynamic compilation
+    //
+    // Used when a Closure has been deserialized and therefore
+    // the Rust generic argument/return types are not available.
+    //
+    // The Closure itself contains:
+    //
+    //     arguments
+    //     return_type
+    //     body
+    //
+    // which is sufficient to generate the LLVM function.
+    // ========================================================
+
+    pub fn compile(
+        &self,
+        closure: &Closure,
+    ) -> Result<
+        DynamicCompiledClosure<'ctx>,
+        String,
+    > {
+        let context =
+            self.context;
+
+
+        let module =
+            context.create_module(
+                "closure_module"
+            );
+
+
+        let function_name =
+            "compiled_closure";
+
+
+        self.generate_function(
+            context,
+            &module,
+            function_name,
+            closure,
+        )?;
+
+
+        println!(
+            "Generated LLVM IR:\n{}",
+            module
+                .print_to_string()
+                .to_string()
+        );
+
+
+        let engine =
+            module
+                .create_jit_execution_engine(
+                    OptimizationLevel::None,
+                )
+                .map_err(|error| {
+                    format!(
+                        "failed to create JIT: {:?}",
+                        error
+                    )
+                })?;
+
+
+        Ok(
+            DynamicCompiledClosure::new(
+                engine,
+                function_name.to_string(),
+                closure.arguments.clone(),
+                closure.return_type.clone(),
             )
         )
     }
