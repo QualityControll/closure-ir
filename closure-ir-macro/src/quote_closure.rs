@@ -19,13 +19,13 @@ fn expand_quote_closure(input: ClosureInput) -> syn::Result<proc_macro2::TokenSt
 
     let argument_type_infos = arguments.iter().map(|argument| {
         let ty = &argument.type_info;
-        quote! { <#ty as ::closure_llvm::CompileType>::type_info() }
+        quote! { <#ty as ::closure_ir::CompileType>::type_info() }
     }).collect::<Vec<_>>();
 
     Ok(quote! {
-        ::closure_llvm::Closure {
+        ::closure_ir::Closure {
             arguments: vec![#(#argument_type_infos),*],
-            return_type: <#return_type as ::closure_llvm::CompileType>::type_info(),
+            return_type: <#return_type as ::closure_ir::CompileType>::type_info(),
             body: #block,
         }
     })
