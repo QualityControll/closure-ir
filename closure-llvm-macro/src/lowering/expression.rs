@@ -1,0 +1,142 @@
+use proc_macro2::TokenStream;
+
+use syn::{
+    Expr as SynExpr,
+    Type,
+};
+
+use crate::parser::ClosureArgument;
+
+use super::{
+    binary,
+    field,
+    if_else,
+    literal,
+    path,
+    tuple,
+    unary,
+};
+
+
+// ============================================================
+// Expression
+// ============================================================
+
+pub(crate) fn lower_expr(
+    expr: &SynExpr,
+    arguments: &[ClosureArgument],
+    expected_type: Option<&Type>,
+) -> syn::Result<TokenStream> {
+    match expr {
+        SynExpr::Path(path) =>
+            path::lower_path(
+                path,
+                arguments,
+            ),
+
+        SynExpr::Lit(literal) =>
+            literal::lower_literal(
+                literal,
+                expected_type,
+            ),
+
+        SynExpr::Binary(binary) =>
+            binary::lower_binary(
+                binary,
+                arguments,
+                expected_type,
+            ),
+
+        SynExpr::Unary(unary) =>
+            unary::lower_unary(
+                unary,
+                arguments,
+                expected_type,
+            ),
+
+        SynExpr::If(if_expr) =>
+            if_else::lower_if(
+                if_expr,
+                arguments,
+                expected_type,
+            ),
+
+        SynExpr::Tuple(tuple) =>
+            tuple::lower_tuple(
+                tuple,
+                arguments,
+            ),
+
+        SynExpr::Field(field) =>
+            field::lower_field(
+                field,
+                arguments,
+            ),
+
+        SynExpr::Paren(paren) =>
+            lower_expr(
+                &paren.expr,
+                arguments,
+                expected_type,
+            ),
+
+        _ =>
+            Err(
+                syn::Error::new_spanned(
+                    expr,
+                    "unsupported expression",
+                )
+            ),
+    }
+}
+
+
+// ============================================================
+// Determine expression type
+// ============================================================
+
+pub(crate) fn expression_type<'a>(
+    expr: &SynExpr,
+    arguments: &'a [ClosureArgument],
+) -> Option<&'a Type> {
+    match expr {
+        SynExpr::Path(path) => {
+            if path.path.segments.len() != 1 {
+                return None;
+            }
+
+            let name =
+                &path.path.segments[0].ident;
+
+            arguments
+                .iter()
+                .find(|argument| {
+                    &argument.name == name
+                })
+                .map(|argument| {
+                    &argument.type_info
+                })
+        }
+
+        SynExpr::Paren(paren) =>
+            expression_type(
+                &paren.expr,
+                arguments,
+            ),
+
+        SynExpr::Binary(binary) =>
+            expression_type(
+                &binary.left,
+                arguments,
+            )
+            .or_else(|| {
+                expression_type(
+                    &binary.right,
+                    arguments,
+                )
+            }),
+
+        _ =>
+            None,
+    }
+}
