@@ -76,11 +76,11 @@ fn lower_block<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: 
                 if body_end.get_terminator().is_none() { builder.build_unconditional_branch(increment_block).map_err(|error| format!("failed to enter for increment: {:?}", error))?; }
                 builder.position_at_end(increment_block);
                 let current = builder.build_load(llvm_type(context, type_info)?, pointer, "for_increment_value").map_err(|error| format!("failed to load for increment value: {:?}", error))?;
-                let next = match current {
-                    BasicValueEnum::IntValue(current) => { let one = current.get_type().const_int(1, false); builder.build_int_add(current, one, "for_next").map(Into::into) }
-                    BasicValueEnum::FloatValue(current) => { let one = current.get_type().const_float(1.0); builder.build_float_add(current, one, "for_next").map(Into::into) }
+                let next: BasicValueEnum = match current {
+                    BasicValueEnum::IntValue(current) => { let one = current.get_type().const_int(1, false); BasicValueEnum::IntValue(builder.build_int_add(current, one, "for_next").map_err(|error| format!("failed to add for increment: {:?}", error))?) }
+                    BasicValueEnum::FloatValue(current) => { let one = current.get_type().const_float(1.0); BasicValueEnum::FloatValue(builder.build_float_add(current, one, "for_next").map_err(|error| format!("failed to add for increment: {:?}", error))?) }
                     _ => return Err("for loops require numeric range types".to_string()),
-                }.map_err(|error| format!("failed to increment for loop: {:?}", error))?;
+                };
                 builder.build_store(pointer, next).map_err(|error| format!("failed to store for increment: {:?}", error))?;
                 builder.build_unconditional_branch(condition_block).map_err(|error| format!("failed to loop back for condition: {:?}", error))?;
                 builder.position_at_end(exit_block);
