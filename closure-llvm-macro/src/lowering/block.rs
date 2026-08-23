@@ -61,13 +61,16 @@ fn lower_stmts(
                             None,
                         ),
 
-                    Pat::Type(pattern) =>
+                    Pat::Type(pattern) => {
+                        let explicit_type =
+                            (*pattern.ty).clone();
+
                         match &*pattern.pat {
                             Pat::Ident(pattern) =>
                                 (
                                     pattern.ident.clone(),
                                     pattern.mutability.is_some(),
-                                    Some((*pattern.ty).clone()),
+                                    Some(explicit_type),
                                 ),
 
                             _ =>
@@ -77,7 +80,8 @@ fn lower_stmts(
                                         "let bindings must use identifiers",
                                     )
                                 ),
-                        },
+                        }
+                    }
 
                     _ =>
                         return Err(
