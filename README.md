@@ -91,7 +91,8 @@ closure-ir/
 └── example/
     ├── Cargo.toml
     └── src/
-        └── main.rs
+        ├── main.rs
+        └── fft.rs
 ```
 
 ## Example
@@ -160,6 +161,87 @@ The reciprocal is computed as:
 \]
 
 For `3 + 4i`, the expected result is `0.12 - 0.16i`.
+
+### FFT example
+
+The project also includes a small in-place radix-2 Cooley–Tukey FFT over a mutable slice of `Complex` values. The FFT demonstrates a much larger portion of the supported closure language, including `len()`, `for` and `while` loops, mutable locals, dynamic slice indexing, indexed assignment, casts, bitwise operations, conditionals, and the `sin`/`cos` intrinsics.
+
+```rust
+use closure_ir::{call, compile_closure, CompileType};
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, CompileType)]
+struct Complex {
+    re: f64,
+    im: f64,
+}
+
+let compiled = compile_closure!(
+    |values: &mut [Complex], pi: f64| {
+        let n = values.len();
+
+        let mut j: usize = 0;
+        for i in 1..n {
+            let mut bit: usize = n >> 1;
+            while (j & bit) != 0 {
+                j = j ^ bit;
+                bit = bit >> 1;
+            }
+            j = j ^ bit;
+
+            let swap_i: Complex = if i < j { values[j] } else { values[i] };
+            let swap_j: Complex = if i < j { values[i] } else { values[j] };
+            values[i] = swap_i;
+            values[j] = swap_j;
+        }
+
+        let mut length: usize = 2;
+        while length <= n {
+            let half: usize = length >> 1;
+            let angle_step: f64 = -2.0 * pi / (length as f64);
+
+            let mut start: usize = 0;
+            while start < n {
+                let mut k: usize = 0;
+                while k < half {
+                    let angle: f64 = angle_step * (k as f64);
+                    let w: Complex = Complex {
+                        re: cos(angle),
+                        im: sin(angle),
+                    };
+
+                    let even: Complex = values[start + k];
+                    let odd: Complex = values[start + k + half];
+
+                    let product: Complex = Complex {
+                        re: odd.re * w.re - odd.im * w.im,
+                        im: odd.re * w.im + odd.im * w.re,
+                    };
+
+                    values[start + k] = Complex {
+                        re: even.re + product.re,
+                        im: even.im + product.im,
+                    };
+                    values[start + k + half] = Complex {
+                        re: even.re - product.re,
+                        im: even.im - product.im,
+                    };
+
+                    k = k + 1;
+                }
+
+                start = start + length;
+            }
+
+            length = length << 1;
+        }
+    }
+);
+
+call!(compiled, &mut values[..], std::f64::consts::PI);
+```
+
+For the complete runnable version, see `example/src/fft.rs`.
 
 ## Related work
 

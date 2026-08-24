@@ -3,6 +3,14 @@ name = "example"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "fft"
+path = "src/fft.rs"
+
+[[bin]]
+name = "reciprocal"
+path = "src/reciprocal.rs"
+
 [dependencies]
 closure-ir = {
     path = "../closure-ir"
