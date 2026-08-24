@@ -1,17 +1,17 @@
-use inkwell::{builder::Builder, context::Context, values::{BasicValueEnum, FunctionValue, PointerValue}};
+use inkwell::{builder::Builder, context::Context, module::Module, values::{BasicValueEnum, FunctionValue, PointerValue}};
 use crate::{compiler::llvm_type, expr::{Block, Statement}, lowering::{LoweredValue, Lowering}, types::TypeInfo};
 
-pub(crate) fn lower_closure_block<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: FunctionValue<'ctx>, arguments: &[PointerValue<'ctx>], argument_types: &[TypeInfo], return_type: &TypeInfo, block: &Block) -> Result<BasicValueEnum<'ctx>, String> {
-    let lowering = Lowering;
-    let (_, _, value) = lower_block(context, builder, function, arguments, argument_types, argument_types.len(), block, Some(return_type))?;
+pub(crate) fn lower_closure_block<'ctx>(context: &'ctx Context, module: &'ctx Module<'ctx>, builder: &Builder<'ctx>, function: FunctionValue<'ctx>, arguments: &[PointerValue<'ctx>], argument_types: &[TypeInfo], return_type: &TypeInfo, block: &Block) -> Result<BasicValueEnum<'ctx>, String> {
+    let lowering = Lowering { module };
+    let (_, _, value) = lower_block(context, module, builder, function, arguments, argument_types, argument_types.len(), block, Some(return_type))?;
     let value = value.ok_or_else(|| "closure block has no result expression".to_string())?;
     let value = lowering.materialize_value(context, builder, value)?;
     if value.get_type() != llvm_type(context, return_type)? { return Err("closure result type does not match declared return type".to_string()); }
     Ok(value)
 }
 
-fn lower_block<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: FunctionValue<'ctx>, arguments: &[PointerValue<'ctx>], argument_types: &[TypeInfo], argument_count: usize, block: &Block, expected_result_type: Option<&TypeInfo>) -> Result<(Vec<PointerValue<'ctx>>, Vec<TypeInfo>, Option<LoweredValue<'ctx>>), String> {
-    let lowering = Lowering;
+fn lower_block<'ctx>(context: &'ctx Context, module: &'ctx Module<'ctx>, builder: &Builder<'ctx>, function: FunctionValue<'ctx>, arguments: &[PointerValue<'ctx>], argument_types: &[TypeInfo], argument_count: usize, block: &Block, expected_result_type: Option<&TypeInfo>) -> Result<(Vec<PointerValue<'ctx>>, Vec<TypeInfo>, Option<LoweredValue<'ctx>>), String> {
+    let lowering = Lowering { module };
     let mut pointers = arguments.to_vec();
     let mut types = argument_types.to_vec();
     for statement in &block.statements {
@@ -44,7 +44,7 @@ fn lower_block<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: 
                 let condition = match condition { BasicValueEnum::IntValue(value) if value.get_type().get_bit_width() == 1 => value, _ => return Err("while condition must be bool".to_string()) };
                 builder.build_conditional_branch(condition, body_block, exit_block).map_err(|error| format!("failed to build while branch: {:?}", error))?;
                 builder.position_at_end(body_block);
-                let _ = lower_block(context, builder, function, &pointers, &types, argument_count, body, None)?;
+                let _ = lower_block(context, module, builder, function, &pointers, &types, argument_count, body, None)?;
                 let body_end = builder.get_insert_block().ok_or_else(|| "missing while body block".to_string())?;
                 if body_end.get_terminator().is_none() { builder.build_unconditional_branch(condition_block).map_err(|error| format!("failed to loop back to condition: {:?}", error))?; }
                 builder.position_at_end(exit_block);
@@ -71,7 +71,7 @@ fn lower_block<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>, function: 
                 }.map_err(|error| format!("failed to compare for bounds: {:?}", error))?;
                 builder.build_conditional_branch(condition, body_block, exit_block).map_err(|error| format!("failed to branch for loop: {:?}", error))?;
                 builder.position_at_end(body_block);
-                let _ = lower_block(context, builder, function, &loop_pointers, &loop_types, argument_count, body, None)?;
+                let _ = lower_block(context, module, builder, function, &loop_pointers, &loop_types, argument_count, body, None)?;
                 let body_end = builder.get_insert_block().ok_or_else(|| "missing for body block".to_string())?;
                 if body_end.get_terminator().is_none() { builder.build_unconditional_branch(increment_block).map_err(|error| format!("failed to enter for increment: {:?}", error))?; }
                 builder.position_at_end(increment_block);
