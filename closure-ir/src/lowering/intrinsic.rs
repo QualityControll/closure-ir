@@ -75,23 +75,25 @@ impl<'ctx> Lowering<'ctx> {
             Intrinsic::Pow => "llvm.pow",
             Intrinsic::Min | Intrinsic::Max | Intrinsic::Tan => unreachable!(),
         };
-        let result = if arguments.len() == 1 {
-            self.build_unary_intrinsic(builder, expected_type, intrinsic_name, float_values[0])?.into()
-        } else {
-            let result_type = match expected_type {
-                TypeInfo::F32 => context.f32_type(),
-                TypeInfo::F64 => context.f64_type(),
-                _ => unreachable!(),
-            };
-            let suffix = if matches!(expected_type, TypeInfo::F32) { "f32" } else { "f64" };
-            let symbol = format!("{}.{}", intrinsic_name, suffix);
-            let function_type = result_type.fn_type(&vec![result_type.into(); float_values.len()], false);
-            let intrinsic_function = self.module.get_function(&symbol).unwrap_or_else(|| self.module.add_function(&symbol, function_type, None));
-            let args = float_values.iter().map(|value| (*value).into()).collect::<Vec<_>>();
-            let call = builder.build_call(intrinsic_function, &args, "intrinsic")
-                .map_err(|error| format!("failed to build {:?} intrinsic: {:?}", intrinsic, error))?;
-            call.try_as_basic_value().basic().ok_or_else(|| format!("{:?} intrinsic did not return a value", intrinsic))?
+
+        if arguments.len() == 1 {
+            let result = self.build_unary_intrinsic(builder, expected_type, intrinsic_name, float_values[0])?;
+            return Ok(LoweredValue::Value(result.into()));
+        }
+
+        let result_type = match expected_type {
+            TypeInfo::F32 => context.f32_type(),
+            TypeInfo::F64 => context.f64_type(),
+            _ => unreachable!(),
         };
+        let suffix = if matches!(expected_type, TypeInfo::F32) { "f32" } else { "f64" };
+        let symbol = format!("{}.{}", intrinsic_name, suffix);
+        let function_type = result_type.fn_type(&vec![result_type.into(); float_values.len()], false);
+        let intrinsic_function = self.module.get_function(&symbol).unwrap_or_else(|| self.module.add_function(&symbol, function_type, None));
+        let args = float_values.iter().map(|value| (*value).into()).collect::<Vec<_>>();
+        let call = builder.build_call(intrinsic_function, &args, "intrinsic")
+            .map_err(|error| format!("failed to build {:?} intrinsic: {:?}", intrinsic, error))?;
+        let result = call.try_as_basic_value().basic().ok_or_else(|| format!("{:?} intrinsic did not return a value", intrinsic))?;
         Ok(LoweredValue::Value(result))
     }
 
@@ -109,7 +111,7 @@ impl<'ctx> Lowering<'ctx> {
         let call = builder.build_call(intrinsic_function, &[value.into()], "intrinsic")
             .map_err(|error| format!("failed to build {}: {:?}", symbol, error))?;
         call.try_as_basic_value().basic()
-            .and_then(|value| value.into_float_value().into())
+            .map(|value| value.into_float_value())
             .ok_or_else(|| format!("{} did not return a floating-point value", symbol))
     }
 }
