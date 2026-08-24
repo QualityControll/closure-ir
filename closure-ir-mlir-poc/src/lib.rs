@@ -3,8 +3,8 @@ use melior::{
     ir::{
         attribute::{StringAttribute, TypeAttribute},
         operation::OperationLike,
-        r#type::FunctionType,
-        Block, Location, Module, Region,
+        r#type::{FunctionType, TypeLike},
+        Block, BlockLike, Location, Module, Region, RegionLike,
     },
     pass::PassManager,
     Context,
@@ -19,14 +19,11 @@ use melior::{
 pub fn build_add_module(context: &Context) -> Module {
     let location = Location::unknown(context);
     let module = Module::new(location);
-    let i32_type = melior::ir::Type::integer(context, 32);
+    let i32_type = melior::ir::Type::parse(context, "i32").expect("valid i32 type");
 
     let block = Block::new(&[(i32_type, location)]);
-    let sum = block.append_operation(arith::addi(
-        block.argument(0).unwrap().into(),
-        block.argument(0).unwrap().into(),
-        location,
-    ));
+    let arg = block.argument(0).unwrap().into();
+    let sum = block.append_operation(arith::addi(arg, arg, location));
     block.append_operation(func::r#return(&[sum.result(0).unwrap().into()], location));
 
     let region = Region::new();
