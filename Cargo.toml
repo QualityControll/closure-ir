@@ -3,6 +3,7 @@ members = [
     "closure-ir",
     "closure-ir-macro",
     "example",
+    "closure-ir-mlir-poc",
 ]
 
 resolver = "2"
