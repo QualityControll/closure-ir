@@ -10,6 +10,7 @@ pub enum Expr {
     Argument(usize), Constant(Value),
     Cast { expr: Box<Expr>, source_type: TypeInfo, target_type: TypeInfo },
     Index { sequence: Box<Expr>, index: Box<Expr> },
+    Len { sequence: Box<Expr> },
     Field { object: Box<Expr>, name: String },
     Struct { type_info: TypeInfo, fields: Vec<(String, Expr)> },
     Tuple { elements: Vec<Expr> },
@@ -24,5 +25,3 @@ pub enum Statement { Let { local: usize, type_info: TypeInfo, value: Expr, mutab
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Block { pub statements: Vec<Statement>, pub result: Option<Expr> }
 impl Block { pub fn expression(result: Expr) -> Self { Self { statements: Vec::new(), result: Some(result) } } pub fn statements(statements: Vec<Statement>) -> Self { Self { statements, result: None } } }
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Closure { pub arguments: Vec<TypeInfo>, pub return_type: TypeInfo, pub body: Block }
