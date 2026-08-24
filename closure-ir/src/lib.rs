@@ -15,7 +15,7 @@ pub use value::Value;
 
 pub use closure_ir_macro::{
     call,
+    closure_ir,
     compile_closure,
-    quote_closure,
     CompileType,
 };

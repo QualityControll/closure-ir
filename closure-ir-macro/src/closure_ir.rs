@@ -6,13 +6,13 @@ use crate::parser::ClosureInput;
 
 pub(crate) fn expand(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ClosureInput);
-    match expand_quote_closure(input) {
+    match expand_closure_ir(input) {
         Ok(tokens) => tokens.into(),
         Err(error) => error.into_compile_error().into(),
     }
 }
 
-fn expand_quote_closure(input: ClosureInput) -> syn::Result<proc_macro2::TokenStream> {
+fn expand_closure_ir(input: ClosureInput) -> syn::Result<proc_macro2::TokenStream> {
     let ClosureInput { arguments, return_type, body } = input;
     let locals = Vec::new();
     let block = lower_block(&body.block, &arguments, &locals, Some(&return_type))?;

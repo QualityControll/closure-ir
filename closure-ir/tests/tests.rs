@@ -1,4 +1,4 @@
-use closure_ir::{call, compile_closure, quote_closure, CompileType};
+use closure_ir::{call, compile_closure, closure_ir, CompileType};
 
 #[cfg(test)]
 mod tests {
@@ -908,7 +908,7 @@ mod tests {
 
     #[test]
     fn dynamic_invocation_add_i32() {
-        let closure = quote_closure!(|x: i32, y: i32| -> i32 { x + y });
+        let closure = closure_ir!(|x: i32, y: i32| -> i32 { x + y });
 
         let context = inkwell::context::Context::create();
 
@@ -929,7 +929,7 @@ mod tests {
 
     #[test]
     fn test_serialization() {
-        let expr = quote_closure!(|x: i32| -> i32 { x });
+        let expr = closure_ir!(|x: i32| -> i32 { x });
 
         let serialized = serde_json::to_string(&expr).unwrap();
 
@@ -942,7 +942,7 @@ mod tests {
 
     #[test]
     fn print_quoted_expr() {
-        let expr = quote_closure!(|x: i32| -> i32 { x });
+        let expr = closure_ir!(|x: i32| -> i32 { x });
 
         println!("expr is {:?}", expr);
     }
