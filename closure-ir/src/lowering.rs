@@ -1,7 +1,7 @@
-use inkwell::{builder::Builder, context::Context, module::Module, types::BasicTypeEnum, values::{BasicValueEnum, FunctionValue, PointerValue}};
-use crate::{expr::{Expr, Intrinsic}, types::TypeInfo};
+use inkwell::{builder::Builder, context::Context, types::BasicTypeEnum, values::{BasicValueEnum, FunctionValue, PointerValue}};
+use crate::{expr::Expr, types::TypeInfo};
 
-pub(crate) struct Lowering<'ctx> { pub(crate) module: &'ctx Module<'ctx> }
+pub(crate) struct Lowering;
 pub(crate) enum LoweredValue<'ctx> { Value(BasicValueEnum<'ctx>), Pointer { pointer: PointerValue<'ctx>, type_info: TypeInfo } }
 
 mod binary;
@@ -13,7 +13,7 @@ mod materialize;
 mod unary;
 mod tuple;
 
-impl<'ctx> Lowering<'ctx> {
+impl<'ctx> Lowering {
     pub(crate) fn lower_expr(&self, context: &'ctx Context, builder: &Builder<'ctx>, function: FunctionValue<'ctx>, arguments: &[PointerValue<'ctx>], argument_types: &[TypeInfo], expected_type: &TypeInfo, expr: &Expr) -> Result<LoweredValue<'ctx>, String> {
         match expr {
             Expr::Argument(index) => { let pointer = *arguments.get(*index).ok_or_else(|| format!("argument index {} out of bounds", index))?; let type_info = argument_types.get(*index).cloned().ok_or_else(|| format!("argument type index {} out of bounds", index))?; Ok(LoweredValue::Pointer { pointer, type_info }) }
