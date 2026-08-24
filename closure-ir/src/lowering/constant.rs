@@ -25,10 +25,7 @@ impl<'ctx> Lowering {
             Value::U128(v) => context.i128_type().const_int_arbitrary_precision(
                 &[*v as u64, (*v >> 64) as u64],
             ).into(),
-            Value::Usize(v) => context
-                .ptr_sized_int_type(inkwell::AddressSpace::default())
-                .const_int(*v as u64, false)
-                .into(),
+            Value::Usize(v) => context.i64_type().const_int(*v as u64, false).into(),
             Value::Bool(v) => context.bool_type().const_int(if *v { 1 } else { 0 }, false).into(),
             Value::Array(values) => {
                 let elems = values
@@ -40,37 +37,18 @@ impl<'ctx> Lowering {
                         })
                     })
                     .collect::<Result<Vec<BasicValueEnum<'ctx>>, String>>()?;
-
-                let first = elems
-                    .first()
-                    .ok_or("empty array constants are not supported")?;
-
+                let first = elems.first().ok_or("empty array constants are not supported")?;
                 match first.get_type() {
-                    BasicTypeEnum::IntType(t) => t
-                        .const_array(&elems.iter().map(|v| v.into_int_value()).collect::<Vec<_>>())
-                        .into(),
-                    BasicTypeEnum::FloatType(t) => t
-                        .const_array(&elems.iter().map(|v| v.into_float_value()).collect::<Vec<_>>())
-                        .into(),
-                    BasicTypeEnum::ArrayType(t) => t
-                        .const_array(&elems.iter().map(|v| v.into_array_value()).collect::<Vec<_>>())
-                        .into(),
-                    BasicTypeEnum::StructType(t) => t
-                        .const_array(&elems.iter().map(|v| v.into_struct_value()).collect::<Vec<_>>())
-                        .into(),
-                    BasicTypeEnum::PointerType(t) => t
-                        .const_array(&elems.iter().map(|v| v.into_pointer_value()).collect::<Vec<_>>())
-                        .into(),
-                    BasicTypeEnum::VectorType(t) => t
-                        .const_array(&elems.iter().map(|v| v.into_vector_value()).collect::<Vec<_>>())
-                        .into(),
-                    BasicTypeEnum::ScalableVectorType(_) => {
-                        return Err("scalable vector array constants are not supported".into())
-                    }
+                    BasicTypeEnum::IntType(t) => t.const_array(&elems.iter().map(|v| v.into_int_value()).collect::<Vec<_>>()).into(),
+                    BasicTypeEnum::FloatType(t) => t.const_array(&elems.iter().map(|v| v.into_float_value()).collect::<Vec<_>>()).into(),
+                    BasicTypeEnum::ArrayType(t) => t.const_array(&elems.iter().map(|v| v.into_array_value()).collect::<Vec<_>>()).into(),
+                    BasicTypeEnum::StructType(t) => t.const_array(&elems.iter().map(|v| v.into_struct_value()).collect::<Vec<_>>()).into(),
+                    BasicTypeEnum::PointerType(t) => t.const_array(&elems.iter().map(|v| v.into_pointer_value()).collect::<Vec<_>>()).into(),
+                    BasicTypeEnum::VectorType(t) => t.const_array(&elems.iter().map(|v| v.into_vector_value()).collect::<Vec<_>>()).into(),
+                    BasicTypeEnum::ScalableVectorType(_) => return Err("scalable vector array constants are not supported".into()),
                 }
             }
         };
-
         Ok(LoweredValue::Value(value))
     }
 }
