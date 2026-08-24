@@ -21,11 +21,10 @@ pub fn fft(values: &mut [Complex], pi: f64) {
                 }
                 j = j ^ bit;
 
-                if i < j {
-                    let tmp: Complex = values[i];
-                    values[i] = values[j];
-                    values[j] = tmp;
-                }
+                let swap_i: Complex = if i < j { values[j] } else { values[i] };
+                let swap_j: Complex = if i < j { values[i] } else { values[j] };
+                values[i] = swap_i;
+                values[j] = swap_j;
             }
 
             let mut length: usize = 2;
