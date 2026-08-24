@@ -5,3 +5,4 @@ mod control_flow;
 mod arithmetic;
 mod structs;
 mod intrinsics;
+mod arrays;
