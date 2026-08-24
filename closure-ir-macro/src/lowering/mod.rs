@@ -6,6 +6,7 @@ pub(crate) mod if_else;
 pub(crate) mod intrinsic;
 pub(crate) mod literal;
 pub(crate) mod path;
+pub(crate) mod structure;
 pub(crate) mod tuple;
 pub(crate) mod unary;
 

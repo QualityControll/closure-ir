@@ -26,23 +26,22 @@ fn main() {
     println!("Complex: {:?}", value);
 
     let compiled = compile_closure!(
-        |z: Complex| -> (f64, f64) {
+        |z: Complex| -> Complex {
             if z.re * z.re + z.im * z.im == 0.0 {
-                (0.0, 0.0)
+                Complex {
+                    re: 0.0,
+                    im: 0.0,
+                }
             } else {
-                (
-                    z.re / (z.re * z.re + z.im * z.im),
-                    -z.im / (z.re * z.re + z.im * z.im),
-                )
+                Complex {
+                    re: z.re / (z.re * z.re + z.im * z.im),
+                    im: -z.im / (z.re * z.re + z.im * z.im),
+                }
             }
         }
     );
 
     let result = call!(compiled, value);
-    let result = Complex {
-        re: result.0,
-        im: result.1,
-    };
 
     println!("JIT result: {:?}", result);
 
