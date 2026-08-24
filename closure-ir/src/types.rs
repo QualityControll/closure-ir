@@ -1,4 +1,4 @@
-use inkwell::{context::Context, types::BasicTypeEnum};
+use inkwell::{context::Context, types::{BasicTypeEnum, BasicType}};
 use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
