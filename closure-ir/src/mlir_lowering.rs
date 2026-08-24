@@ -4,9 +4,10 @@ use melior::{
         attribute::{FloatAttribute, IntegerAttribute, StringAttribute, TypeAttribute},
         operation::OperationLike,
         r#type::FunctionType,
-        Block, BlockLike, Context, Location, Module, Region, Type, Value,
+        Block, BlockLike, Location, Module, Region, RegionLike, Type, Value,
     },
     utility::register_all_dialects,
+    Context,
 };
 
 use crate::{
@@ -72,16 +73,16 @@ impl<'c> MlirLowerer<'c> {
         let operation = match value {
             ClosureValue::F32(value) => arith::constant(self.context, FloatAttribute::new(self.context, Type::float32(self.context), *value as f64).into(), self.location),
             ClosureValue::F64(value) => arith::constant(self.context, FloatAttribute::new(self.context, Type::float64(self.context), *value).into(), self.location),
-            ClosureValue::I8(value) => self.integer_constant(*value as i64, 8),
-            ClosureValue::I16(value) => self.integer_constant(*value as i64, 16),
-            ClosureValue::I32(value) => self.integer_constant(*value as i64, 32),
-            ClosureValue::I64(value) => self.integer_constant(*value, 64),
-            ClosureValue::U8(value) => self.integer_constant(*value as i64, 8),
-            ClosureValue::U16(value) => self.integer_constant(*value as i64, 16),
-            ClosureValue::U32(value) => self.integer_constant(*value as i64, 32),
-            ClosureValue::U64(value) => self.integer_constant(*value as i64, 64),
-            ClosureValue::Usize(value) => self.integer_constant(*value as i64, 64),
-            ClosureValue::Bool(value) => self.integer_constant(i64::from(*value), 1),
+            ClosureValue::I8(value) => self.integer_constant(*value as i64, 8)?,
+            ClosureValue::I16(value) => self.integer_constant(*value as i64, 16)?,
+            ClosureValue::I32(value) => self.integer_constant(*value as i64, 32)?,
+            ClosureValue::I64(value) => self.integer_constant(*value, 64)?,
+            ClosureValue::U8(value) => self.integer_constant(*value as i64, 8)?,
+            ClosureValue::U16(value) => self.integer_constant(*value as i64, 16)?,
+            ClosureValue::U32(value) => self.integer_constant(*value as i64, 32)?,
+            ClosureValue::U64(value) => self.integer_constant(*value as i64, 64)?,
+            ClosureValue::Usize(value) => self.integer_constant(*value as i64, 64)?,
+            ClosureValue::Bool(value) => self.integer_constant(i64::from(*value), 1)?,
             ClosureValue::I128(_) | ClosureValue::U128(_) | ClosureValue::Array(_) => {
                 return Err(format!("MLIR constant lowering does not yet support {value:?}"));
             }
@@ -89,12 +90,18 @@ impl<'c> MlirLowerer<'c> {
         Ok(block.append_operation(operation).result(0).unwrap().into())
     }
 
-    fn integer_constant(&self, value: i64, bits: u32) -> melior::ir::Operation<'c> {
-        arith::constant(self.context, IntegerAttribute::new(Type::integer(self.context, bits), value).into(), self.location)
+    fn integer_constant(&self, value: i64, bits: u32) -> Result<melior::ir::Operation<'c>, String> {
+        let ty = Type::parse(self.context, &format!("i{bits}"))
+            .ok_or_else(|| format!("failed to create MLIR integer type i{bits}"))?;
+        Ok(arith::constant(
+            self.context,
+            IntegerAttribute::new(ty, value).into(),
+            self.location,
+        ))
     }
 }
 
-pub(crate) fn lower_simple_closure(context: &Context, closure: &Closure) -> Result<Module<'_>, String> {
+pub(crate) fn lower_simple_closure<'c>(context: &'c Context, closure: &Closure) -> Result<Module<'c>, String> {
     register_all_dialects(context);
     MlirLowerer::new(context).lower_simple_closure(closure)
 }
