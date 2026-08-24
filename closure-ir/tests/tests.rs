@@ -6,3 +6,4 @@ mod arithmetic;
 mod structs;
 mod intrinsics;
 mod arrays;
+mod slices;
