@@ -45,8 +45,9 @@ fn test_sin_cos_tan() {
 fn test_exp_and_log() {
     let exp = compile_closure!(|x: f64| -> f64 { exp(x) });
     let log = compile_closure!(|x: f64| -> f64 { log(x) });
-    assert!((call!(exp, 1.0) - std::f64::consts::E).abs() < 1e-12);
-    assert!((call!(log, std::f64::consts::E) - 1.0).abs() < 1e-12);
+    let e = 2.718281828459045_f64;
+    assert!((call!(exp, 1.0) - e).abs() < 1e-12);
+    assert!((call!(log, e) - 1.0).abs() < 1e-12);
 }
 
 #[test]
