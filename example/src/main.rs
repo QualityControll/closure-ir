@@ -7,7 +7,7 @@ use closure_ir::{
 
 
 // ============================================================
-// Point
+// Complex
 // ============================================================
 
 #[repr(C)]
@@ -17,26 +17,9 @@ use closure_ir::{
     Copy,
     CompileType,
 )]
-struct Point {
-    x: f64,
-    y: f64,
-}
-
-
-// ============================================================
-// Rectangle
-// ============================================================
-
-#[repr(C)]
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    CompileType,
-)]
-struct Rectangle {
-    top_left: Point,
-    bottom_right: Point,
+struct Complex {
+    re: f64,
+    im: f64,
 }
 
 
@@ -46,7 +29,6 @@ fn quote_expr() {
     });
 
     println!("quoted expression: {:?}", expr);
-
 }
 
 
@@ -55,46 +37,54 @@ fn quote_expr() {
 // ============================================================
 
 fn main() {
-    let rectangle =
-        Rectangle {
-            top_left: Point {
-                x: 10.0,
-                y: 20.0,
-            },
-
-            bottom_right: Point {
-                x: 50.0,
-                y: 80.0,
-            },
-        };
-
+    let value = Complex {
+        re: 3.0,
+        im: 4.0,
+    };
 
     println!(
-        "Rectangle: {:?}",
-        rectangle
+        "Complex: {:?}",
+        value
     );
 
 
     // --------------------------------------------------------
     // Compile the closure to LLVM
     //
-    // compile_closure! does all of the following:
+    // The reciprocal of a complex number is:
     //
-    //   1. Creates the LLVM context
-    //   2. Builds the Closure description
-    //   3. Lowers the Rust expression
-    //   4. Generates LLVM IR
-    //   5. JIT compiles the function
-    //   6. Returns CompiledClosure<Rectangle, f64>
+    //     1 / (a + bi) = (a - bi) / (a² + b²)
     //
-    // There is NO additional .compile() call.
+    // Therefore:
+    //
+    //     re = a / (a² + b²)
+    //     im = -b / (a² + b²)
     // --------------------------------------------------------
 
     let compiled =
         compile_closure!(
-            |r: Rectangle| -> f64 {
-                r.bottom_right.x
-                    - r.top_left.x
+            |z: Complex| -> Complex {
+                let denominator =
+                    z.re * z.re
+                    + z.im * z.im;
+
+                if denominator == 0.0 {
+                    Complex {
+                        re: 0.0,
+                        im: 0.0,
+                    }
+                } else {
+                    let re =
+                        z.re / denominator;
+
+                    let im =
+                        -z.im / denominator;
+
+                    Complex {
+                        re,
+                        im,
+                    }
+                }
             }
         );
 
@@ -106,12 +96,12 @@ fn main() {
     let result =
         call!(
             compiled,
-            rectangle
+            value
         );
 
 
     println!(
-        "JIT result: {}",
+        "JIT result: {:?}",
         result
     );
 
@@ -119,15 +109,21 @@ fn main() {
     // --------------------------------------------------------
     // Expected result:
     //
-    //     50.0 - 10.0 = 40.0
+    //     1 / (3 + 4i)
+    //       = (3 - 4i) / 25
+    //       = 0.12 - 0.16i
     // --------------------------------------------------------
 
     assert_eq!(
-        result,
-        40.0
+        result.re,
+        0.12
     );
 
-    //print the expression that is generated from a helper macro
-    quote_expr();
+    assert_eq!(
+        result.im,
+        -0.16
+    );
 
+    // Print the expression generated from a helper macro.
+    quote_expr();
 }
