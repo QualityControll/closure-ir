@@ -29,7 +29,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(DynamicCompiledClosure::new(engine, function_name.to_string(), closure.arguments.clone(), closure.return_type.clone()))
     }
 
-    fn generate_function(&self, context: &'ctx Context, module: &Module<'ctx>, function_name: &str, closure: &Closure) -> Result<(), String> {
+    fn generate_function(&self, context: &'ctx Context, module: &'ctx Module<'ctx>, function_name: &str, closure: &Closure) -> Result<(), String> {
         let pointer_type = context.ptr_type(AddressSpace::default());
         let function_type = context.void_type().fn_type(&[pointer_type.into(), pointer_type.into()], false);
         let function = module.add_function(function_name, function_type, None);
@@ -45,7 +45,7 @@ impl<'ctx> Compiler<'ctx> {
         if function.verify(true) { Ok(()) } else { Err("LLVM function verification failed".to_string()) }
     }
 
-    fn generate_dynamic_function(&self, context: &'ctx Context, module: &Module<'ctx>, function_name: &str, closure: &Closure) -> Result<(), String> {
+    fn generate_dynamic_function(&self, context: &'ctx Context, module: &'ctx Module<'ctx>, function_name: &str, closure: &Closure) -> Result<(), String> {
         let pointer_type = context.ptr_type(AddressSpace::default());
         let function_type = context.void_type().fn_type(&[pointer_type.into(), pointer_type.into()], false);
         let function = module.add_function(function_name, function_type, None);
