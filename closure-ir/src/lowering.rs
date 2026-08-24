@@ -2,7 +2,6 @@ use inkwell::{
     builder::Builder,
     context::Context,
     types::{
-        BasicType,
         BasicTypeEnum,
         StructType,
     },
@@ -540,10 +539,11 @@ impl<'ctx> Lowering {
             );
 
         let module =
-            function
-                .get_parent()
+            builder
+                .get_insert_block()
+                .and_then(|block| block.get_parent())
                 .ok_or_else(|| {
-                    "intrinsic lowering requires a parent LLVM module"
+                    "intrinsic lowering requires an active LLVM function"
                         .to_string()
                 })?;
 
@@ -589,18 +589,18 @@ impl<'ctx> Lowering {
                     format!(
                         "failed to build {:?} intrinsic: {:?}",
                         intrinsic,
-                        error,
+                        error
                     )
                 })?;
 
         let result =
             call
                 .try_as_basic_value()
-                .left()
+                .basic()
                 .ok_or_else(|| {
                     format!(
                         "{:?} intrinsic did not return a value",
-                        intrinsic,
+                        intrinsic
                     )
                 })?;
 
