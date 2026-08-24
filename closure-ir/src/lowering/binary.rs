@@ -3,68 +3,16 @@ use crate::{expr::Expr, operators::{binary_operand_type, BinaryOp}, types::TypeI
 use super::{LoweredValue, Lowering};
 
 impl<'ctx> Lowering {
-    pub(crate) fn lower_binary(
-        &self,
-        context: &'ctx Context,
-        builder: &Builder<'ctx>,
-        function: FunctionValue<'ctx>,
-        arguments: &[PointerValue<'ctx>],
-        argument_types: &[TypeInfo],
-        expected_type: &TypeInfo,
-        lhs: &Expr,
-        rhs: &Expr,
-        operation: BinaryOp,
-    ) -> Result<LoweredValue<'ctx>, String> {
+    pub(crate) fn lower_binary(&self, context: &'ctx Context, builder: &Builder<'ctx>, function: FunctionValue<'ctx>, arguments: &[PointerValue<'ctx>], argument_types: &[TypeInfo], expected_type: &TypeInfo, lhs: &Expr, rhs: &Expr, operation: BinaryOp) -> Result<LoweredValue<'ctx>, String> {
         let operand_type = binary_operand_type(argument_types, lhs, rhs, expected_type, &operation)?;
         let lhs = self.materialize_value(context, builder, self.lower_expr(context, builder, function, arguments, argument_types, &operand_type, lhs)?)?;
         let rhs = self.materialize_value(context, builder, self.lower_expr(context, builder, function, arguments, argument_types, &operand_type, rhs)?)?;
-        match (lhs, rhs) {
-            (BasicValueEnum::FloatValue(lhs), BasicValueEnum::FloatValue(rhs)) => self.lower_float_binary(builder, lhs, rhs, operation),
-            (BasicValueEnum::IntValue(lhs), BasicValueEnum::IntValue(rhs)) => self.lower_int_binary(builder, lhs, rhs, operation, &operand_type),
-            _ => Err("binary operands must have matching numeric or integer types".to_string()),
-        }
+        match (lhs, rhs) { (BasicValueEnum::FloatValue(lhs), BasicValueEnum::FloatValue(rhs)) => self.lower_float_binary(builder, lhs, rhs, operation), (BasicValueEnum::IntValue(lhs), BasicValueEnum::IntValue(rhs)) => self.lower_int_binary(builder, lhs, rhs, operation, &operand_type), _ => Err("binary operands must have matching numeric or integer types".to_string()) }
     }
-
     fn lower_float_binary(&self, builder: &Builder<'ctx>, lhs: FloatValue<'ctx>, rhs: FloatValue<'ctx>, operation: BinaryOp) -> Result<LoweredValue<'ctx>, String> {
-        let result = match operation {
-            BinaryOp::Add => builder.build_float_add(lhs, rhs, "add").map(|v| v.into()),
-            BinaryOp::Sub => builder.build_float_sub(lhs, rhs, "sub").map(|v| v.into()),
-            BinaryOp::Mul => builder.build_float_mul(lhs, rhs, "mul").map(|v| v.into()),
-            BinaryOp::Div => builder.build_float_div(lhs, rhs, "div").map(|v| v.into()),
-            BinaryOp::Rem => builder.build_float_rem(lhs, rhs, "rem").map(|v| v.into()),
-            BinaryOp::Eq => builder.build_float_compare(FloatPredicate::OEQ, lhs, rhs, "cmp").map(|v| v.into()),
-            BinaryOp::Ne => builder.build_float_compare(FloatPredicate::ONE, lhs, rhs, "cmp").map(|v| v.into()),
-            BinaryOp::Lt => builder.build_float_compare(FloatPredicate::OLT, lhs, rhs, "cmp").map(|v| v.into()),
-            BinaryOp::Le => builder.build_float_compare(FloatPredicate::OLE, lhs, rhs, "cmp").map(|v| v.into()),
-            BinaryOp::Gt => builder.build_float_compare(FloatPredicate::OGT, lhs, rhs, "cmp").map(|v| v.into()),
-            BinaryOp::Ge => builder.build_float_compare(FloatPredicate::OGE, lhs, rhs, "cmp").map(|v| v.into()),
-            _ => return Err("unsupported floating-point operator".to_string()),
-        }.map_err(|e| format!("failed to build floating-point operation: {:?}", e))?;
-        Ok(LoweredValue::Value(result))
+        let result = match operation { BinaryOp::Add => builder.build_float_add(lhs, rhs, "add").map(|v| v.into()), BinaryOp::Sub => builder.build_float_sub(lhs, rhs, "sub").map(|v| v.into()), BinaryOp::Mul => builder.build_float_mul(lhs, rhs, "mul").map(|v| v.into()), BinaryOp::Div => builder.build_float_div(lhs, rhs, "div").map(|v| v.into()), BinaryOp::Rem => builder.build_float_rem(lhs, rhs, "rem").map(|v| v.into()), BinaryOp::Eq => builder.build_float_compare(FloatPredicate::OEQ, lhs, rhs, "cmp").map(|v| v.into()), BinaryOp::Ne => builder.build_float_compare(FloatPredicate::ONE, lhs, rhs, "cmp").map(|v| v.into()), BinaryOp::Lt => builder.build_float_compare(FloatPredicate::OLT, lhs, rhs, "cmp").map(|v| v.into()), BinaryOp::Le => builder.build_float_compare(FloatPredicate::OLE, lhs, rhs, "cmp").map(|v| v.into()), BinaryOp::Gt => builder.build_float_compare(FloatPredicate::OGT, lhs, rhs, "cmp").map(|v| v.into()), BinaryOp::Ge => builder.build_float_compare(FloatPredicate::OGE, lhs, rhs, "cmp").map(|v| v.into()), _ => return Err("unsupported floating-point operator".to_string()) }.map_err(|e| format!("failed to build floating-point operation: {:?}", e))?; Ok(LoweredValue::Value(result))
     }
-
     fn lower_int_binary(&self, builder: &Builder<'ctx>, lhs: IntValue<'ctx>, rhs: IntValue<'ctx>, operation: BinaryOp, type_info: &TypeInfo) -> Result<LoweredValue<'ctx>, String> {
-        let unsigned = type_info.is_unsigned_integer();
-        let result = match operation {
-            BinaryOp::Add => builder.build_int_add(lhs, rhs, "add"),
-            BinaryOp::Sub => builder.build_int_sub(lhs, rhs, "sub"),
-            BinaryOp::Mul => builder.build_int_mul(lhs, rhs, "mul"),
-            BinaryOp::Div => if unsigned { builder.build_int_unsigned_div(lhs, rhs, "div") } else { builder.build_int_signed_div(lhs, rhs, "div") },
-            BinaryOp::Rem => if unsigned { builder.build_int_unsigned_rem(lhs, rhs, "rem") } else { builder.build_int_signed_rem(lhs, rhs, "rem") },
-            BinaryOp::Eq => builder.build_int_compare(IntPredicate::EQ, lhs, rhs, "eq"),
-            BinaryOp::Ne => builder.build_int_compare(IntPredicate::NE, lhs, rhs, "ne"),
-            BinaryOp::Lt => builder.build_int_compare(if unsigned { IntPredicate::ULT } else { IntPredicate::SLT }, lhs, rhs, "lt"),
-            BinaryOp::Le => builder.build_int_compare(if unsigned { IntPredicate::ULE } else { IntPredicate::SLE }, lhs, rhs, "le"),
-            BinaryOp::Gt => builder.build_int_compare(if unsigned { IntPredicate::UGT } else { IntPredicate::SGT }, lhs, rhs, "gt"),
-            BinaryOp::Ge => builder.build_int_compare(if unsigned { IntPredicate::UGE } else { IntPredicate::SGE }, lhs, rhs, "ge"),
-            BinaryOp::And => builder.build_and(lhs, rhs, "and"),
-            BinaryOp::Or => builder.build_or(lhs, rhs, "or"),
-            BinaryOp::BitAnd => builder.build_and(lhs, rhs, "bitand"),
-            BinaryOp::BitOr => builder.build_or(lhs, rhs, "bitor"),
-            BinaryOp::BitXor => builder.build_xor(lhs, rhs, "bitxor"),
-            BinaryOp::Shl => builder.build_left_shift(lhs, rhs, "shl"),
-            BinaryOp::Shr => builder.build_right_shift(lhs, rhs, !unsigned, "shr"),
-        }.map_err(|e| format!("failed to build integer operation: {:?}", e))?;
-        Ok(LoweredValue::Value(result.into()))
+        let unsigned = type_info.is_unsigned_integer(); let result = match operation { BinaryOp::Add => builder.build_int_add(lhs, rhs, "add"), BinaryOp::Sub => builder.build_int_sub(lhs, rhs, "sub"), BinaryOp::Mul => builder.build_int_mul(lhs, rhs, "mul"), BinaryOp::Div => if unsigned { builder.build_int_unsigned_div(lhs, rhs, "div") } else { builder.build_int_signed_div(lhs, rhs, "div") }, BinaryOp::Rem => if unsigned { builder.build_int_unsigned_rem(lhs, rhs, "rem") } else { builder.build_int_signed_rem(lhs, rhs, "rem") }, BinaryOp::Eq => builder.build_int_compare(IntPredicate::EQ, lhs, rhs, "eq"), BinaryOp::Ne => builder.build_int_compare(IntPredicate::NE, lhs, rhs, "ne"), BinaryOp::Lt => builder.build_int_compare(if unsigned { IntPredicate::ULT } else { IntPredicate::SLT }, lhs, rhs, "lt"), BinaryOp::Le => builder.build_int_compare(if unsigned { IntPredicate::ULE } else { IntPredicate::SLE }, lhs, rhs, "le"), BinaryOp::Gt => builder.build_int_compare(if unsigned { IntPredicate::UGT } else { IntPredicate::SGT }, lhs, rhs, "gt"), BinaryOp::Ge => builder.build_int_compare(if unsigned { IntPredicate::UGE } else { IntPredicate::SGE }, lhs, rhs, "ge"), BinaryOp::And => builder.build_and(lhs, rhs, "and"), BinaryOp::Or => builder.build_or(lhs, rhs, "or"), BinaryOp::BitAnd => builder.build_and(lhs, rhs, "bitand"), BinaryOp::BitOr => builder.build_or(lhs, rhs, "bitor"), BinaryOp::BitXor => builder.build_xor(lhs, rhs, "bitxor"), BinaryOp::Shl => builder.build_left_shift(lhs, rhs, "shl"), BinaryOp::Shr => builder.build_right_shift(lhs, rhs, !unsigned, "shr") }.map_err(|e| format!("failed to build integer operation: {:?}", e))?; Ok(LoweredValue::Value(result.into()))
     }
 }
