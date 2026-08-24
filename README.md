@@ -96,126 +96,70 @@ closure-ir/
 
 ## Example
 
+The following example demonstrates a JIT-compiled complex-number reciprocal. It exercises struct arguments, struct field access, arithmetic, conditionals, unary negation, and **struct construction inside the closure**.
+
 ```rust
 use closure_ir::{
     call,
     compile_closure,
+    closure_ir,
     CompileType,
 };
 
-
-// ============================================================
-// Point
-// ============================================================
-
 #[repr(C)]
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    CompileType,
-)]
-struct Point {
-    x: f64,
-    y: f64,
+#[derive(Debug, Clone, Copy, CompileType)]
+struct Complex {
+    re: f64,
+    im: f64,
 }
 
+fn quote_expr() {
+    let expr = closure_ir!(|x: i32| -> bool {
+        true
+    });
 
-// ============================================================
-// Rectangle
-// ============================================================
-
-#[repr(C)]
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    CompileType,
-)]
-struct Rectangle {
-    top_left: Point,
-    bottom_right: Point,
+    println!("quoted expression: {:?}", expr);
 }
-
-
-// ============================================================
-// Main
-// ============================================================
 
 fn main() {
-    let rectangle =
-        Rectangle {
-            top_left: Point {
-                x: 10.0,
-                y: 20.0,
-            },
+    let value = Complex { re: 3.0, im: 4.0 };
 
-            bottom_right: Point {
-                x: 50.0,
-                y: 80.0,
-            },
-        };
+    println!("Complex: {:?}", value);
 
-
-    println!(
-        "Rectangle: {:?}",
-        rectangle
-    );
-
-
-    // --------------------------------------------------------
-    // Compile the closure to LLVM
-    //
-    // compile_closure! does all of the following:
-    //
-    //   1. Creates the LLVM context
-    //   2. Builds the Closure description
-    //   3. Lowers the Rust expression
-    //   4. Generates LLVM IR
-    //   5. JIT compiles the function
-    //   6. Returns CompiledClosure<Rectangle, f64>
-    //
-    // There is NO additional .compile() call.
-    // --------------------------------------------------------
-
-    let compiled =
-        compile_closure!(
-            |r: Rectangle| -> f64 {
-                r.bottom_right.x
-                    - r.top_left.x
+    let compiled = compile_closure!(
+        |z: Complex| -> Complex {
+            if z.re * z.re + z.im * z.im == 0.0 {
+                Complex {
+                    re: 0.0,
+                    im: 0.0,
+                }
+            } else {
+                Complex {
+                    re: z.re / (z.re * z.re + z.im * z.im),
+                    im: -z.im / (z.re * z.re + z.im * z.im),
+                }
             }
-        );
-
-
-    // --------------------------------------------------------
-    // Call the JIT compiled function
-    // --------------------------------------------------------
-
-    let result =
-        call!(
-            compiled,
-            rectangle
-        );
-
-
-    println!(
-        "JIT result: {}",
-        result
+        }
     );
 
+    let result = call!(compiled, value);
 
-    // --------------------------------------------------------
-    // Expected result:
-    //
-    //     50.0 - 10.0 = 40.0
-    // --------------------------------------------------------
+    println!("JIT result: {:?}", result);
 
-    assert_eq!(
-        result,
-        40.0
-    );
+    assert_eq!(result.re, 0.12);
+    assert_eq!(result.im, -0.16);
+
+    quote_expr();
 }
 ```
+
+The reciprocal is computed as:
+
+\[
+\frac{1}{a + bi} = \frac{a - bi}{a^2 + b^2}
+\]
+
+For `3 + 4i`, the expected result is `0.12 - 0.16i`.
 
 ## Related work
 
@@ -243,6 +187,7 @@ This is complementary to a distributed runtime rather than an attempt to replace
  - [x] Nested expressions
  - [ ] Arrays
  - [x] Tuples
+ - [x] Struct literals
  - [ ] Enums
  - [ ] Generic types
  - [ ] Better error reporting
