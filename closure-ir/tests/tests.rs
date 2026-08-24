@@ -4,3 +4,4 @@ mod arguments;
 mod control_flow;
 mod arithmetic;
 mod structs;
+mod intrinsics;
