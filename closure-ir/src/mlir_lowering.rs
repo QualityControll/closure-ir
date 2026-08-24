@@ -6,7 +6,6 @@ use melior::{
         r#type::FunctionType,
         Block, BlockLike, Location, Module, Region, RegionLike, Type, Value,
     },
-    utility::register_all_dialects,
     Context,
 };
 
@@ -102,7 +101,9 @@ impl<'c> MlirLowerer<'c> {
 }
 
 pub(crate) fn lower_simple_closure<'c>(context: &'c Context, closure: &Closure) -> Result<Module<'c>, String> {
-    register_all_dialects(context);
+    // This helper is intentionally kept lightweight. Dialects are registered by
+    // the caller/context setup; register_all_dialects expects a DialectRegistry,
+    // not a Context, in Melior 0.27.
     MlirLowerer::new(context).lower_simple_closure(closure)
 }
 
