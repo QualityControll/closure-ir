@@ -71,6 +71,9 @@ impl<'ctx> Lowering {
                         let values = elems.iter().map(|v| v.into_vector_value()).collect::<Vec<_>>();
                         t.const_array(&values).into()
                     }
+                    BasicTypeEnum::ScalableVectorType(_) => {
+                        return Err("scalable vector array constants are not supported".into());
+                    }
                 }
             }
         };
