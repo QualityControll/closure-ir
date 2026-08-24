@@ -8,7 +8,7 @@ pub enum Intrinsic { Sqrt, Abs, Min, Max, Floor, Ceil, Round, Sin, Cos, Tan, Exp
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Expr {
     Argument(usize), Constant(Value),
-    Index { array: Box<Expr>, index: Box<Expr> },
+    Index { sequence: Box<Expr>, index: Box<Expr> },
     Field { object: Box<Expr>, name: String }, Tuple { elements: Vec<Expr> },
     Intrinsic { intrinsic: Intrinsic, arguments: Vec<Expr> },
     Add { lhs: Box<Expr>, rhs: Box<Expr> }, Sub { lhs: Box<Expr>, rhs: Box<Expr> }, Mul { lhs: Box<Expr>, rhs: Box<Expr> }, Div { lhs: Box<Expr>, rhs: Box<Expr> }, Rem { lhs: Box<Expr>, rhs: Box<Expr> },
