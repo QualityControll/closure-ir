@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use syn::{Expr as SynExpr, Type};
 use crate::parser::ClosureArgument;
-use super::{binary, field, if_else, literal, path, tuple, unary};
+use super::{binary, field, if_else, intrinsic, literal, path, tuple, unary};
 
 #[derive(Clone)]
 pub(crate) struct LocalVariable {
@@ -25,6 +25,7 @@ pub(crate) fn lower_expr(
         SynExpr::If(if_expr) => if_else::lower_if(if_expr, arguments, locals, expected_type),
         SynExpr::Tuple(tuple) => tuple::lower_tuple(tuple, arguments, locals),
         SynExpr::Field(field) => field::lower_field(field, arguments, locals),
+        SynExpr::Call(call) => intrinsic::lower_call(call, arguments, locals, expected_type),
         SynExpr::Paren(paren) => lower_expr(&paren.expr, arguments, locals, expected_type),
         _ => Err(syn::Error::new_spanned(expr, "unsupported expression")),
     }
