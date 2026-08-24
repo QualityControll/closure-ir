@@ -19,13 +19,7 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
             Stmt::Local(local) => {
                 let (name, mutable, explicit_type) = match &local.pat {
                     Pat::Ident(pattern) => (pattern.ident.clone(), pattern.mutability.is_some(), None),
-                    Pat::Type(pattern) => {
-                        let explicit_type = (*pattern.ty).clone();
-                        match &*pattern.pat {
-                            Pat::Ident(pattern) => (pattern.ident.clone(), pattern.mutability.is_some(), Some(explicit_type)),
-                            _ => return Err(syn::Error::new_spanned(&pattern.pat, "let bindings must use identifiers")),
-                        }
-                    }
+                    Pat::Type(pattern) => { let explicit_type = (*pattern.ty).clone(); match &*pattern.pat { Pat::Ident(pattern) => (pattern.ident.clone(), pattern.mutability.is_some(), Some(explicit_type)), _ => return Err(syn::Error::new_spanned(&pattern.pat, "let bindings must use identifiers")), } }
                     _ => return Err(syn::Error::new_spanned(&local.pat, "let bindings must use identifiers")),
                 };
                 let initializer = local.init.as_ref().ok_or_else(|| syn::Error::new_spanned(local, "let bindings require an initializer"))?;
@@ -37,37 +31,18 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
                 current_locals.push(LocalVariable { name, index, type_info: Some(local_type), mutable });
             }
             Stmt::Expr(expr, _) => {
-                if let syn::Expr::While(while_expr) = expr {
-                    let condition = lower_expr(&while_expr.cond, arguments, &current_locals, Some(&syn::parse_quote!(bool)))?;
-                    let body = lower_block(&while_expr.body, arguments, &current_locals, None)?;
-                    statement_tokens.push(quote! { ::closure_ir::Statement::While { condition: #condition, body: #body } });
-                    continue;
-                }
-                if let syn::Expr::ForLoop(for_expr) = expr {
-                    let name = match &*for_expr.pat {
-                        Pat::Ident(pattern) => pattern.ident.clone(),
-                        _ => return Err(syn::Error::new_spanned(&for_expr.pat, "for loop bindings must use identifiers")),
-                    };
-                    let range = match &*for_expr.expr {
-                        syn::Expr::Range(range) => range,
-                        _ => return Err(syn::Error::new_spanned(&for_expr.expr, "for loops currently require a range expression")),
-                    };
-                    let start = range.start.as_ref().ok_or_else(|| syn::Error::new_spanned(range, "for ranges require a start value"))?;
-                    let end = range.end.as_ref().ok_or_else(|| syn::Error::new_spanned(range, "for ranges require an end value"))?;
-                    let local_type = expression_type(start, arguments, &current_locals).or_else(|| expression_type(end, arguments, &current_locals)).ok_or_else(|| syn::Error::new_spanned(range, "cannot infer for-loop range type"))?;
-                    let start_expr = lower_expr(start, arguments, &current_locals, Some(&local_type))?;
-                    let end_expr = lower_expr(end, arguments, &current_locals, Some(&local_type))?;
-                    let local_index = current_locals.len();
-                    let type_info = quote! { <#local_type as ::closure_ir::CompileType>::type_info() };
-                    let mut body_locals = current_locals.clone();
-                    body_locals.push(LocalVariable { name: name.clone(), index: local_index, type_info: Some(local_type.clone()), mutable: false });
-                    let body = lower_block(&for_expr.body, arguments, &body_locals, None)?;
-                    let inclusive = matches!(range.limits, syn::RangeLimits::Closed(_));
-                    statement_tokens.push(quote! { ::closure_ir::Statement::For { local: #local_index, type_info: #type_info, start: #start_expr, end: #end_expr, inclusive: #inclusive, body: #body } });
-                    current_locals.push(LocalVariable { name, index: local_index, type_info: Some(local_type), mutable: false });
-                    continue;
-                }
+                if let syn::Expr::While(while_expr) = expr { let condition = lower_expr(&while_expr.cond, arguments, &current_locals, Some(&syn::parse_quote!(bool)))?; let body = lower_block(&while_expr.body, arguments, &current_locals, None)?; statement_tokens.push(quote! { ::closure_ir::Statement::While { condition: #condition, body: #body } }); continue; }
+                if let syn::Expr::ForLoop(for_expr) = expr { let name = match &*for_expr.pat { Pat::Ident(pattern) => pattern.ident.clone(), _ => return Err(syn::Error::new_spanned(&for_expr.pat, "for loop bindings must use identifiers")), }; let range = match &*for_expr.expr { syn::Expr::Range(range) => range, _ => return Err(syn::Error::new_spanned(&for_expr.expr, "for loops currently require a range expression")), }; let start = range.start.as_ref().ok_or_else(|| syn::Error::new_spanned(range, "for ranges require a start value"))?; let end = range.end.as_ref().ok_or_else(|| syn::Error::new_spanned(range, "for ranges require an end value"))?; let local_type = expression_type(start, arguments, &current_locals).or_else(|| expression_type(end, arguments, &current_locals)).ok_or_else(|| syn::Error::new_spanned(range, "cannot infer for-loop range type"))?; let start_expr = lower_expr(start, arguments, &current_locals, Some(&local_type))?; let end_expr = lower_expr(end, arguments, &current_locals, Some(&local_type))?; let local_index = current_locals.len(); let type_info = quote! { <#local_type as ::closure_ir::CompileType>::type_info() }; let mut body_locals = current_locals.clone(); body_locals.push(LocalVariable { name: name.clone(), index: local_index, type_info: Some(local_type.clone()), mutable: false }); let body = lower_block(&for_expr.body, arguments, &body_locals, None)?; let inclusive = matches!(range.limits, syn::RangeLimits::Closed(_)); statement_tokens.push(quote! { ::closure_ir::Statement::For { local: #local_index, type_info: #type_info, start: #start_expr, end: #end_expr, inclusive: #inclusive, body: #body } }); current_locals.push(LocalVariable { name, index: local_index, type_info: Some(local_type), mutable: false }); continue; }
                 if let syn::Expr::Assign(assign) = expr {
+                    if matches!(&*assign.left, syn::Expr::Index(_)) {
+                        let target_type = expression_type(&assign.left, arguments, &current_locals).ok_or_else(|| syn::Error::new_spanned(&assign.left, "cannot determine indexed assignment element type"))?;
+                        let syn::Expr::Index(index_expr) = &*assign.left else { unreachable!() };
+                        let sequence = lower_expr(&index_expr.expr, arguments, &current_locals, None)?;
+                        let index = lower_expr(&index_expr.index, arguments, &current_locals, Some(&syn::parse_quote!(usize)))?;
+                        let value = lower_expr(&assign.right, arguments, &current_locals, Some(&target_type))?;
+                        statement_tokens.push(quote! { ::closure_ir::Statement::AssignIndex { sequence: #sequence, index: #index, value: #value } });
+                        continue;
+                    }
                     let (index, expected) = assignment_target(assign, &current_locals)?;
                     let value = lower_expr(&assign.right, arguments, &current_locals, expected)?;
                     statement_tokens.push(quote! { ::closure_ir::Statement::Assign { local: #index, value: #value } });
@@ -79,7 +54,6 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
             other => return Err(syn::Error::new_spanned(other, "only let bindings, assignments, while loops, for loops, and a final expression are supported")),
         }
     }
-
     if result.is_none() && expected_type.is_some() { return Err(syn::Error::new(proc_macro2::Span::call_site(), "closure block must end with an expression")); }
     let result_tokens = match result { Some(result) => quote! { Some(#result) }, None => quote! { None } };
     Ok(quote! { ::closure_ir::Block { statements: vec![#(#statement_tokens),*], result: #result_tokens } })
