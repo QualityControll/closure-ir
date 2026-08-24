@@ -24,7 +24,7 @@ fn test_mutate_array_with_runtime_index() {
         values[index] = 77;
         values[index]
     });
-    assert_eq!(call!(compiled, ([10, 20, 30, 40], 2usize)), 77);
+    assert_eq!(call!(compiled, [10, 20, 30, 40], 2usize), 77);
 }
 
 #[test]
