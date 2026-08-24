@@ -12,7 +12,7 @@ pub(crate) fn expression_type(argument_types: &[TypeInfo], expr: &Expr) -> Resul
         Expr::Argument(index) => argument_types.get(*index).cloned().ok_or_else(|| format!("argument index {} out of bounds", index)),
         Expr::Constant(value) => Ok(match value {
             Value::F32(_) => TypeInfo::F32, Value::F64(_) => TypeInfo::F64, Value::I8(_) => TypeInfo::I8, Value::I16(_) => TypeInfo::I16, Value::I32(_) => TypeInfo::I32, Value::I64(_) => TypeInfo::I64, Value::I128(_) => TypeInfo::I128,
-            Value::U8(_) => TypeInfo::U8, Value::U16(_) => TypeInfo::U16, Value::U32(_) => TypeInfo::U32, Value::U64(_) => TypeInfo::U64, Value::U128(_) => TypeInfo::U128, Value::Bool(_) => TypeInfo::Bool,
+            Value::U8(_) => TypeInfo::U8, Value::U16(_) => TypeInfo::U16, Value::U32(_) => TypeInfo::U32, Value::U64(_) => TypeInfo::U64, Value::U128(_) => TypeInfo::U128, Value::Usize(_) => TypeInfo::Usize, Value::Bool(_) => TypeInfo::Bool,
             Value::Array(values) => { let first = values.first().ok_or("empty array constants are not supported")?; TypeInfo::Array { element: Box::new(expression_type(argument_types, &Expr::Constant(first.clone()))?), length: values.len() } }
         }),
         Expr::Index { array, index } => { let array_type = expression_type(argument_types, array)?; let index_type = expression_type(argument_types, index)?; if !index_type.is_integer() { return Err("array index must be an integer".into()); } match array_type { TypeInfo::Array { element, .. } => Ok(*element), _ => Err("cannot index non-array type".into()) } }
