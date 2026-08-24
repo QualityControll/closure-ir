@@ -4,7 +4,7 @@ mod call;
 mod compile_closure;
 mod compile_type;
 mod parser;
-mod quote_closure;
+mod closure_ir;
 
 mod lowering;
 
@@ -22,14 +22,14 @@ pub fn derive_closure_type(
 
 
 // ============================================================
-// quote_closure!
+// closure_ir!
 // ============================================================
 
 #[proc_macro]
-pub fn quote_closure(
+pub fn closure_ir(
     input: TokenStream,
 ) -> TokenStream {
-    quote_closure::expand(input)
+    closure_ir::expand(input)
 }
 
 
