@@ -1,6 +1,7 @@
 use inkwell::{
     builder::Builder,
     context::Context,
+    module::Module,
     types::{
         BasicTypeEnum,
         StructType,
@@ -47,10 +48,12 @@ pub(crate) enum LoweredValue<'ctx> {
 // Lowering
 // ============================================================
 
-pub(crate) struct Lowering;
+pub(crate) struct Lowering<'ctx> {
+    module: &'ctx Module<'ctx>,
+}
 
 
-impl<'ctx> Lowering {
+impl<'ctx> Lowering<'ctx> {
 
     // ========================================================
     // Expression lowering
@@ -538,15 +541,6 @@ impl<'ctx> Lowering {
                 false,
             );
 
-        let module =
-            builder
-                .get_insert_block()
-                .and_then(|block| block.get_parent())
-                .ok_or_else(|| {
-                    "intrinsic lowering requires an active LLVM function"
-                        .to_string()
-                })?;
-
         let suffix =
             if matches!(expected_type, TypeInfo::F32) {
                 "f32"
@@ -562,10 +556,10 @@ impl<'ctx> Lowering {
             );
 
         let intrinsic_function =
-            module
+            self.module
                 .get_function(&intrinsic_symbol)
                 .unwrap_or_else(|| {
-                    module.add_function(
+                    self.module.add_function(
                         &intrinsic_symbol,
                         function_type,
                         None,
