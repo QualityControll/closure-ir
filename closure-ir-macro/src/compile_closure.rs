@@ -6,42 +6,21 @@ use crate::parser::ClosureInput;
 
 pub(crate) fn expand(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ClosureInput);
-    match expand_compile_closure(input) {
-        Ok(tokens) => tokens.into(),
-        Err(error) => error.into_compile_error().into(),
-    }
+    match expand_compile_closure(input) { Ok(tokens) => tokens.into(), Err(error) => error.into_compile_error().into() }
 }
 
 fn expand_compile_closure(input: ClosureInput) -> syn::Result<proc_macro2::TokenStream> {
     let ClosureInput { arguments, return_type, body } = input;
     let locals = Vec::new();
-    let block = lower_block(&body.block, &arguments, &locals, Some(&return_type))?;
-
-    let argument_type_infos = arguments.iter().map(|argument| {
-        let ty = &argument.type_info;
-        quote! { <#ty as ::closure_ir::CompileType>::type_info() }
-    }).collect::<Vec<_>>();
-
+    let is_unit = matches!(&return_type, syn::Type::Tuple(tuple) if tuple.elems.is_empty());
+    let block = if is_unit { lower_block(&body.block, &arguments, &locals, None)? } else { lower_block(&body.block, &arguments, &locals, Some(&return_type))? };
+    let argument_type_infos = arguments.iter().map(|argument| { let ty = &argument.type_info; quote! { <#ty as ::closure_ir::CompileType>::type_info() } }).collect::<Vec<_>>();
     let argument_types = arguments.iter().map(|argument| &argument.type_info).collect::<Vec<_>>();
-    let tuple_type = if argument_types.is_empty() {
-        quote! { () }
-    } else {
-        quote! { (#(#argument_types,)*) }
-    };
-
-    Ok(quote! {
-        {
-            let __closure = ::closure_ir::Closure {
-                arguments: vec![#(#argument_type_infos),*],
-                return_type: <#return_type as ::closure_ir::CompileType>::type_info(),
-                body: #block,
-            };
-            let __context: &'static ::inkwell::context::Context = Box::leak(
-                Box::new(::inkwell::context::Context::create())
-            );
-            let __compiler = ::closure_ir::Compiler::new(__context);
-            __compiler.compile::<#tuple_type, #return_type>(&__closure)
-                .expect("failed to compile closure")
-        }
-    })
+    let tuple_type = if argument_types.is_empty() { quote! { () } } else { quote! { (#(#argument_types,)*) } };
+    Ok(quote! {{
+        let __closure = ::closure_ir::Closure { arguments: vec![#(#argument_type_infos),*], return_type: <#return_type as ::closure_ir::CompileType>::type_info(), body: #block };
+        let __context: &'static ::inkwell::context::Context = Box::leak(Box::new(::inkwell::context::Context::create()));
+        let __compiler = ::closure_ir::Compiler::new(__context);
+        __compiler.compile::<#tuple_type, #return_type>(&__closure).expect("failed to compile closure")
+    }})
 }
