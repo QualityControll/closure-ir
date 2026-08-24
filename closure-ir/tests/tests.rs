@@ -1,9 +1,75 @@
-use closure_ir::{call, compile_closure, closure_ir, CompileType};
+use closure_ir::{call, closure_ir, compile_closure, CompileType};
 
 #[cfg(test)]
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn test_abs_i32() {
+        let compiled = compile_closure!(|x: i32| -> i32 { abs(x) });
+        assert_eq!(call!(compiled, -7), 7);
+        assert_eq!(call!(compiled, 0), 0);
+        assert_eq!(call!(compiled, 7), 7);
+    }
+
+    #[test]
+    fn test_abs_f64() {
+        let compiled = compile_closure!(|x: f64| -> f64 { abs(x) });
+        assert_eq!(call!(compiled, -3.5), 3.5);
+        assert_eq!(call!(compiled, 3.5), 3.5);
+    }
+
+    #[test]
+    fn test_min_i32() {
+        let compiled = compile_closure!(|x: i32, y: i32| -> i32 { min(x, y) });
+        assert_eq!(call!(compiled, 3, 7), 3);
+        assert_eq!(call!(compiled, 7, 3), 3);
+    }
+
+    #[test]
+    fn test_max_i32() {
+        let compiled = compile_closure!(|x: i32, y: i32| -> i32 { max(x, y) });
+        assert_eq!(call!(compiled, 3, 7), 7);
+        assert_eq!(call!(compiled, 7, 3), 7);
+    }
+
+    #[test]
+    fn test_min_max_nested() {
+        let compiled = compile_closure!(|x: i32, y: i32, z: i32| -> i32 { max(min(x, y), z) });
+        assert_eq!(call!(compiled, 10, 4, 6), 6);
+        assert_eq!(call!(compiled, 2, 9, 7), 7);
+    }
+
+    #[test]
+    fn test_sqrt_f32() {
+        let compiled = compile_closure!(|x: f32| -> f32 { sqrt(x) });
+        assert!((call!(compiled, 9.0) - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_sqrt_f64() {
+        let compiled = compile_closure!(|x: f64| -> f64 { sqrt(x) });
+        assert!((call!(compiled, 2.25) - 1.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_pow_f32() {
+        let compiled = compile_closure!(|x: f32| -> f32 { pow(x, 3.0) });
+        assert!((call!(compiled, 2.0) - 8.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_pow_f64() {
+        let compiled = compile_closure!(|x: f64| -> f64 { pow(x, 0.5) });
+        assert!((call!(compiled, 9.0) - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_sqrt_and_pow_nested() {
+        let compiled = compile_closure!(|x: f64| -> f64 { pow(sqrt(x), 2.0) });
+        assert!((call!(compiled, 16.0) - 16.0).abs() < 1e-12);
+    }
 
     // ============================================================
     // while loop
