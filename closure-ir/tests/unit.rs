@@ -14,22 +14,22 @@ fn test_explicit_unit_return_type() {
 
 #[test]
 fn test_unit_closure_with_argument() {
-    let compiled = compile_closure!(|value: &mut i32| {
-        *value = 42;
+    let compiled = compile_closure!(|values: &mut [i32]| {
+        values[0] = 42;
     });
-    let mut value = 0;
-    call!(compiled, &mut value);
-    assert_eq!(value, 42);
+    let mut values = [0];
+    call!(compiled, &mut values[..]);
+    assert_eq!(values[0], 42);
 }
 
 #[test]
 fn test_unit_closure_with_multiple_statements() {
-    let compiled = compile_closure!(|value: &mut i32| {
-        let mut result: i32 = *value;
+    let compiled = compile_closure!(|values: &mut [i32]| {
+        let mut result: i32 = values[0];
         result = result + 10;
-        *value = result;
+        values[0] = result;
     });
-    let mut value = 5;
-    call!(compiled, &mut value);
-    assert_eq!(value, 15);
+    let mut values = [5];
+    call!(compiled, &mut values[..]);
+    assert_eq!(values[0], 15);
 }
