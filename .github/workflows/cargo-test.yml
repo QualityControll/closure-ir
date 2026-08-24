@@ -20,5 +20,20 @@ jobs:
           version: "22.1.5"
           env: true
 
+      # llvm-full provides the LLVM development files, but MLIR is packaged
+      # separately. mlir-sys needs the MLIR C headers and libraries in the
+      # same LLVM 22 prefix.
+      - name: Install MLIR 22 development files
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmlir-22-dev mlir-22-tools
+
+      - name: Verify LLVM and MLIR installation
+        run: |
+          llvm-config --version
+          llvm-config --prefix
+          test -d /usr/lib/llvm-22/include/mlir-c
+          test -e /usr/lib/llvm-22/lib/libMLIR.so || test -e /usr/lib/llvm-22/lib/libMLIR.a
+
       - name: Cargo test
         run: cargo test
