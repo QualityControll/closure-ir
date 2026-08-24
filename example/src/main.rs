@@ -12,12 +12,12 @@ struct Complex {
     im: f64,
 }
 
-fn quote_expr() {
+fn print_ir() {
     let expr = closure_ir!(|x: i32| -> bool {
         true
     });
 
-    println!("quoted expression: {:?}", expr);
+    println!("IR expression: {:?}", expr);
 }
 
 fn main() {
@@ -67,5 +67,5 @@ fn main() {
     assert_eq!(values[2].re, 5.0 / 169.0);
     assert_eq!(values[2].im, -12.0 / 169.0);
 
-    quote_expr();
+    print_ir();
 }
