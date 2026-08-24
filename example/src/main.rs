@@ -1,7 +1,7 @@
 use closure_ir::{
     call,
     compile_closure,
-    quote_closure,
+    closure_ir,
     CompileType,
 };
 
@@ -41,7 +41,7 @@ struct Rectangle {
 
 
 fn quote_expr() {
-    let expr = quote_closure!(|x: i32| -> bool {
+    let expr = closure_ir!(|x: i32| -> bool {
         true
     });
 
