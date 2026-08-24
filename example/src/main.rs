@@ -30,7 +30,7 @@ fn main() {
     println!("Input: {:?}", values);
 
     let compiled = compile_closure!(
-        |values: &mut [Complex], count: usize| {
+        |values: &mut [Complex], count: usize| -> usize {
             for i in 0..count {
                 let z = values[i];
                 let denominator = z.re * z.re + z.im * z.im;
@@ -47,10 +47,13 @@ fn main() {
                     };
                 }
             }
+
+            count
         }
     );
 
-    call!(compiled, &mut values[..], values.len());
+    let processed = call!(compiled, &mut values[..], values.len());
+    assert_eq!(processed, values.len());
 
     println!("JIT result: {:?}", values);
 
