@@ -35,17 +35,19 @@ fn main() {
                 let z: Complex = values[i];
                 let denominator: f64 = z.re * z.re + z.im * z.im;
 
-                if denominator == 0.0 {
-                    values[i] = Complex {
+                let result: Complex = if denominator == 0.0 {
+                    Complex {
                         re: 0.0,
                         im: 0.0,
-                    };
+                    }
                 } else {
-                    values[i] = Complex {
+                    Complex {
                         re: z.re / denominator,
                         im: -z.im / denominator,
-                    };
-                }
+                    }
+                };
+
+                values[i] = result;
             }
 
             count
