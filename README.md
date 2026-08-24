@@ -238,9 +238,9 @@ This is complementary to a distributed runtime rather than an attempt to replace
  - [x] Conditional expressions
  - [x] if expressions
  - [x] Local variables
- - [ ] Multiple statements
+ - [x] Multiple statements
  - [ ] Function calls
- - [ ] Nested expressions
+ - [x] Nested expressions
  - [ ] Arrays
  - [x] Tuples
  - [ ] Enums
