@@ -27,16 +27,13 @@ fn main() {
 
     let compiled = compile_closure!(
         |z: Complex| -> (f64, f64) {
-            let denominator: f64 =
-                z.re * z.re + z.im * z.im;
-
-            if denominator == 0.0 {
+            if z.re * z.re + z.im * z.im == 0.0 {
                 (0.0, 0.0)
             } else {
-                let re: f64 = z.re / denominator;
-                let im: f64 = -z.im / denominator;
-
-                (re, im)
+                (
+                    z.re / (z.re * z.re + z.im * z.im),
+                    -z.im / (z.re * z.re + z.im * z.im),
+                )
             }
         }
     );
