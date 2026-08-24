@@ -24,7 +24,7 @@ pub(crate) fn lower_struct(
             Member::Unnamed(member) => return Err(syn::Error::new_spanned(member, "struct literals must use named fields")),
         };
         let value = lower_expr(&field.expr, arguments, locals, None)?;
-        fields.push(quote! { (#name.to_string(), #value) });
+        fields.push(quote! { (stringify!(#name).to_string(), #value) });
     }
 
     Ok(quote! {
