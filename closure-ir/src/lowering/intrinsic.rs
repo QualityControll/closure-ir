@@ -36,11 +36,10 @@ impl<'ctx> Lowering<'ctx> {
             _ => Err(format!("{:?} requires floating-point arguments", intrinsic)),
         }).collect::<Result<Vec<FloatValue<'ctx>>, String>>()?;
 
-        let result_type = match expected_type {
-            TypeInfo::F32 => context.f32_type(),
-            TypeInfo::F64 => context.f64_type(),
+        match expected_type {
+            TypeInfo::F32 | TypeInfo::F64 => {}
             _ => return Err(format!("{:?} requires an f32 or f64 result type", intrinsic)),
-        };
+        }
 
         if matches!(intrinsic, Intrinsic::Min | Intrinsic::Max) {
             let predicate = match intrinsic {
@@ -55,6 +54,14 @@ impl<'ctx> Lowering<'ctx> {
             return Ok(LoweredValue::Value(result));
         }
 
+        if matches!(intrinsic, Intrinsic::Tan) {
+            let sin = self.build_unary_intrinsic(builder, expected_type, "llvm.sin", float_values[0])?;
+            let cos = self.build_unary_intrinsic(builder, expected_type, "llvm.cos", float_values[0])?;
+            let result = builder.build_float_div(sin, cos, "tan")
+                .map_err(|error| format!("failed to build tan: {:?}", error))?;
+            return Ok(LoweredValue::Value(result.into()));
+        }
+
         let intrinsic_name = match intrinsic {
             Intrinsic::Sqrt => "llvm.sqrt",
             Intrinsic::Abs => "llvm.fabs",
@@ -63,20 +70,46 @@ impl<'ctx> Lowering<'ctx> {
             Intrinsic::Round => "llvm.round",
             Intrinsic::Sin => "llvm.sin",
             Intrinsic::Cos => "llvm.cos",
-            Intrinsic::Tan => "llvm.tan",
             Intrinsic::Exp => "llvm.exp",
             Intrinsic::Log => "llvm.log",
             Intrinsic::Pow => "llvm.pow",
-            Intrinsic::Min | Intrinsic::Max => unreachable!(),
+            Intrinsic::Min | Intrinsic::Max | Intrinsic::Tan => unreachable!(),
         };
-        let suffix = if matches!(expected_type, TypeInfo::F32) { "f32" } else { "f64" };
-        let symbol = format!("{}.{}", intrinsic_name, suffix);
-        let function_type = result_type.fn_type(&vec![result_type.into(); float_values.len()], false);
-        let intrinsic_function = self.module.get_function(&symbol).unwrap_or_else(|| self.module.add_function(&symbol, function_type, None));
-        let args = float_values.iter().map(|value| (*value).into()).collect::<Vec<_>>();
-        let call = builder.build_call(intrinsic_function, &args, "intrinsic")
-            .map_err(|error| format!("failed to build {:?} intrinsic: {:?}", intrinsic, error))?;
-        let result = call.try_as_basic_value().basic().ok_or_else(|| format!("{:?} intrinsic did not return a value", intrinsic))?;
+        let result = if arguments.len() == 1 {
+            self.build_unary_intrinsic(builder, expected_type, intrinsic_name, float_values[0])?.into()
+        } else {
+            let result_type = match expected_type {
+                TypeInfo::F32 => context.f32_type(),
+                TypeInfo::F64 => context.f64_type(),
+                _ => unreachable!(),
+            };
+            let suffix = if matches!(expected_type, TypeInfo::F32) { "f32" } else { "f64" };
+            let symbol = format!("{}.{}", intrinsic_name, suffix);
+            let function_type = result_type.fn_type(&vec![result_type.into(); float_values.len()], false);
+            let intrinsic_function = self.module.get_function(&symbol).unwrap_or_else(|| self.module.add_function(&symbol, function_type, None));
+            let args = float_values.iter().map(|value| (*value).into()).collect::<Vec<_>>();
+            let call = builder.build_call(intrinsic_function, &args, "intrinsic")
+                .map_err(|error| format!("failed to build {:?} intrinsic: {:?}", intrinsic, error))?;
+            call.try_as_basic_value().basic().ok_or_else(|| format!("{:?} intrinsic did not return a value", intrinsic))?
+        };
         Ok(LoweredValue::Value(result))
+    }
+
+    fn build_unary_intrinsic(
+        &self,
+        builder: &Builder<'ctx>,
+        expected_type: &TypeInfo,
+        name: &str,
+        value: FloatValue<'ctx>,
+    ) -> Result<FloatValue<'ctx>, String> {
+        let suffix = if matches!(expected_type, TypeInfo::F32) { "f32" } else { "f64" };
+        let symbol = format!("{}.{}", name, suffix);
+        let function_type = value.get_type().fn_type(&[value.get_type().into()], false);
+        let intrinsic_function = self.module.get_function(&symbol).unwrap_or_else(|| self.module.add_function(&symbol, function_type, None));
+        let call = builder.build_call(intrinsic_function, &[value.into()], "intrinsic")
+            .map_err(|error| format!("failed to build {}: {:?}", symbol, error))?;
+        call.try_as_basic_value().basic()
+            .and_then(|value| value.into_float_value().into())
+            .ok_or_else(|| format!("{} did not return a floating-point value", symbol))
     }
 }
