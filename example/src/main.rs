@@ -32,8 +32,8 @@ fn main() {
     let compiled = compile_closure!(
         |values: &mut [Complex], count: usize| -> usize {
             for i in 0..count {
-                let z = values[i];
-                let denominator = z.re * z.re + z.im * z.im;
+                let z: Complex = values[i];
+                let denominator: f64 = z.re * z.re + z.im * z.im;
 
                 if denominator == 0.0 {
                     values[i] = Complex {
