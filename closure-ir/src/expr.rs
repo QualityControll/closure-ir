@@ -29,6 +29,10 @@ pub enum Expr {
     Shr { lhs: Box<Expr>, rhs: Box<Expr> },
     Not { operand: Box<Expr> },
     Neg { operand: Box<Expr> },
+    SqrtF32 { operand: Box<Expr> },
+    SqrtF64 { operand: Box<Expr> },
+    PowF32 { lhs: Box<Expr>, rhs: Box<Expr> },
+    PowF64 { lhs: Box<Expr>, rhs: Box<Expr> },
     IfElse { condition: Box<Expr>, then_branch: Box<Expr>, else_branch: Box<Expr> },
 }
 
