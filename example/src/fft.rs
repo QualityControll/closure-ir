@@ -9,7 +9,7 @@ pub struct Complex {
 
 pub fn fft(values: &mut [Complex], pi: f64) {
     let compiled = compile_closure!(
-        |values: &mut [Complex], pi: f64| {
+        |values: &mut [Complex], pi: f64| -> usize {
             let n = values.len();
 
             let mut j: usize = 0;
@@ -65,6 +65,7 @@ pub fn fft(values: &mut [Complex], pi: f64) {
                 }
                 length = length << 1;
             }
+            n
         }
     );
 
