@@ -30,12 +30,17 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
                     Some(local_type) => quote! { <#local_type as ::closure_ir::CompileType>::type_info() },
                     None => {
                         let initializer_expr = &initializer.expr;
-                        let argument_bindings = arguments.iter().map(|argument| {
-                            let name = &argument.name;
-                            let ty = &argument.type_info;
-                            quote!(#name: #ty)
-                        });
-                        quote! { ::closure_ir::type_info_of(|#(#argument_bindings),*| #initializer_expr) }
+                        let helper = match arguments.len() {
+                            0 => quote! { ::closure_ir::type_info_of(|| #initializer_expr) },
+                            1 => {
+                                let argument = &arguments[0];
+                                let name = &argument.name;
+                                let ty = &argument.type_info;
+                                quote! { ::closure_ir::type_info_of1(|#name: #ty| #initializer_expr) }
+                            }
+                            _ => return Err(syn::Error::new_spanned(&initializer.expr, "cannot infer local variable type for closures with more than one argument")),
+                        };
+                        helper
                     }
                 };
                 statement_tokens.push(quote! { ::closure_ir::Statement::Let { local: #index, type_info: #type_info, value: #value, mutable: #mutable } });
