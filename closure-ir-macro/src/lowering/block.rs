@@ -28,7 +28,15 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
                 let index = current_locals.len();
                 let type_info = match &inferred_type {
                     Some(local_type) => quote! { <#local_type as ::closure_ir::CompileType>::type_info() },
-                    None => { let initializer_expr = &initializer.expr; quote! { ::closure_ir::type_info_of(|| #initializer_expr) } },
+                    None => {
+                        let initializer_expr = &initializer.expr;
+                        let argument_bindings = arguments.iter().map(|argument| {
+                            let name = &argument.name;
+                            let ty = &argument.type_info;
+                            quote!(#name: #ty)
+                        });
+                        quote! { ::closure_ir::type_info_of(|#(#argument_bindings),*| #initializer_expr) }
+                    }
                 };
                 statement_tokens.push(quote! { ::closure_ir::Statement::Let { local: #index, type_info: #type_info, value: #value, mutable: #mutable } });
                 current_locals.push(LocalVariable { name, index, type_info: inferred_type, mutable });
