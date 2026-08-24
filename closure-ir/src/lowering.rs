@@ -2,6 +2,7 @@ use inkwell::{
     builder::Builder,
     context::Context,
     types::{
+        BasicType,
         BasicTypeEnum,
         StructType,
     },
@@ -18,7 +19,7 @@ use inkwell::{
 
 use crate::{
     compiler::llvm_type,
-    expr::Expr,
+    expr::{Expr, Intrinsic},
     operators::{
         binary_operand_type,
         BinaryOp,
@@ -131,6 +132,21 @@ impl<'ctx> Lowering {
                     argument_types,
                     expected_type,
                     elements,
+                ),
+
+            Expr::Intrinsic {
+                intrinsic,
+                arguments,
+            } =>
+                self.lower_intrinsic(
+                    context,
+                    builder,
+                    function,
+                    arguments,
+                    argument_types,
+                    expected_type,
+                    *intrinsic,
+                    arguments,
                 ),
 
             Expr::IfElse {
@@ -408,6 +424,189 @@ impl<'ctx> Lowering {
                     UnaryOp::Neg,
                 ),
         }
+    }
+
+
+    // ========================================================
+    // Intrinsic
+    // ========================================================
+
+    fn lower_intrinsic(
+        &self,
+        context: &'ctx Context,
+        builder: &Builder<'ctx>,
+        function: FunctionValue<'ctx>,
+        argument_pointers: &[PointerValue<'ctx>],
+        argument_types: &[TypeInfo],
+        expected_type: &TypeInfo,
+        intrinsic: Intrinsic,
+        arguments: &[Expr],
+    ) -> Result<LoweredValue<'ctx>, String> {
+        let expected_arguments =
+            match intrinsic {
+                Intrinsic::Min | Intrinsic::Max | Intrinsic::Pow => 2,
+                _ => 1,
+            };
+
+        if arguments.len() != expected_arguments {
+            return Err(format!(
+                "{:?} expects {} argument(s), got {}",
+                intrinsic,
+                expected_arguments,
+                arguments.len(),
+            ));
+        }
+
+        let mut values = Vec::with_capacity(arguments.len());
+
+        for argument in arguments {
+            let value =
+                self.lower_expr(
+                    context,
+                    builder,
+                    function,
+                    argument_pointers,
+                    argument_types,
+                    expected_type,
+                    argument,
+                )?;
+
+            let value =
+                self.materialize_value(
+                    context,
+                    builder,
+                    value,
+                )?;
+
+            values.push(value);
+        }
+
+        let float_values =
+            values
+                .into_iter()
+                .map(|value| {
+                    match value {
+                        BasicValueEnum::FloatValue(value) =>
+                            Ok(value),
+
+                        _ =>
+                            Err(format!(
+                                "{:?} requires floating-point arguments",
+                                intrinsic,
+                            )),
+                    }
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+
+        let float_type =
+            match expected_type {
+                TypeInfo::F32 =>
+                    context.f32_type(),
+
+                TypeInfo::F64 =>
+                    context.f64_type(),
+
+                _ =>
+                    return Err(format!(
+                        "{:?} requires an f32 or f64 result type",
+                        intrinsic,
+                    )),
+            };
+
+        let intrinsic_name =
+            match intrinsic {
+                Intrinsic::Sqrt => "llvm.sqrt",
+                Intrinsic::Sin => "llvm.sin",
+                Intrinsic::Cos => "llvm.cos",
+                Intrinsic::Tan => "llvm.tan",
+                Intrinsic::Exp => "llvm.exp",
+                Intrinsic::Log => "llvm.log",
+                Intrinsic::Abs => "llvm.fabs",
+                Intrinsic::Min => "llvm.minnum",
+                Intrinsic::Max => "llvm.maxnum",
+                Intrinsic::Floor => "llvm.floor",
+                Intrinsic::Ceil => "llvm.ceil",
+                Intrinsic::Round => "llvm.round",
+                Intrinsic::Pow => "llvm.pow",
+            };
+
+        let function_type =
+            float_type.fn_type(
+                &vec![
+                    float_type.into();
+                    float_values.len()
+                ],
+                false,
+            );
+
+        let module =
+            function
+                .get_parent()
+                .ok_or_else(|| {
+                    "intrinsic lowering requires a parent LLVM module"
+                        .to_string()
+                })?;
+
+        let suffix =
+            if matches!(expected_type, TypeInfo::F32) {
+                "f32"
+            } else {
+                "f64"
+            };
+
+        let intrinsic_symbol =
+            format!(
+                "{}.{}",
+                intrinsic_name,
+                suffix,
+            );
+
+        let intrinsic_function =
+            module
+                .get_function(&intrinsic_symbol)
+                .unwrap_or_else(|| {
+                    module.add_function(
+                        &intrinsic_symbol,
+                        function_type,
+                        None,
+                    )
+                });
+
+        let arguments =
+            float_values
+                .iter()
+                .map(|value| (*value).into())
+                .collect::<Vec<_>>();
+
+        let call =
+            builder
+                .build_call(
+                    intrinsic_function,
+                    &arguments,
+                    "intrinsic",
+                )
+                .map_err(|error| {
+                    format!(
+                        "failed to build {:?} intrinsic: {:?}",
+                        intrinsic,
+                        error,
+                    )
+                })?;
+
+        let result =
+            call
+                .try_as_basic_value()
+                .left()
+                .ok_or_else(|| {
+                    format!(
+                        "{:?} intrinsic did not return a value",
+                        intrinsic,
+                    )
+                })?;
+
+        Ok(
+            LoweredValue::Value(result)
+        )
     }
 
 
