@@ -1,0 +1,235 @@
+name: intrinsics-ci
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  test-and-implement:
+    if: github.event.pull_request.head.ref == 'add-intrinsics'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: add-intrinsics
+          fetch-depth: 0
+
+      - name: Implement intrinsic lowering
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path("closure-ir/src/lowering.rs")
+          s = p.read_text()
+          needle = """            Expr::Tuple { elements } =>
+                self.lower_tuple(
+                    context,
+                    builder,
+                    function,
+                    arguments,
+                    argument_types,
+                    expected_type,
+                    elements,
+                ),
+
+            Expr::IfElse {"""
+          replacement = """            Expr::Tuple { elements } =>
+                self.lower_tuple(
+                    context,
+                    builder,
+                    function,
+                    arguments,
+                    argument_types,
+                    expected_type,
+                    elements,
+                ),
+
+            Expr::Intrinsic { intrinsic, arguments: intrinsic_arguments } =>
+                self.lower_intrinsic(
+                    context,
+                    builder,
+                    function,
+                    arguments,
+                    argument_types,
+                    expected_type,
+                    intrinsic,
+                    intrinsic_arguments,
+                ),
+
+            Expr::IfElse {"""
+          if needle not in s:
+              raise SystemExit("lowering match insertion point not found")
+          s = s.replace(needle, replacement, 1)
+
+          marker = """    // ========================================================
+    // Tuple
+    // ========================================================
+"""
+          implementation = r'''    fn lower_intrinsic(
+        &self,
+        context: &'ctx Context,
+        builder: &Builder<'ctx>,
+        function: FunctionValue<'ctx>,
+        arguments: &[PointerValue<'ctx>],
+        argument_types: &[TypeInfo],
+        expected_type: &TypeInfo,
+        intrinsic: &crate::expr::Intrinsic,
+        intrinsic_arguments: &[Expr],
+    ) -> Result<LoweredValue<'ctx>, String> {
+        use crate::expr::Intrinsic;
+
+        let arity = match intrinsic {
+            Intrinsic::Min | Intrinsic::Max | Intrinsic::Pow => 2,
+            _ => 1,
+        };
+        if intrinsic_arguments.len() != arity {
+            return Err(format!("intrinsic {:?} expects {} argument(s)", intrinsic, arity));
+        }
+
+        let mut values = Vec::with_capacity(arity);
+        for argument in intrinsic_arguments {
+            let value = self.lower_expr(context, builder, function, arguments, argument_types, expected_type, argument)?;
+            values.push(self.materialize_value(context, builder, value)?);
+        }
+
+        match intrinsic {
+            Intrinsic::Abs => match values.as_slice() {
+                [BasicValueEnum::FloatValue(value)] => Ok(LoweredValue::Value(
+                    self.build_float_unary_intrinsic(context, builder, function, "llvm.fabs", *value)?.into()
+                )),
+                [BasicValueEnum::IntValue(value)] => {
+                    let unsigned = matches!(expected_type,
+                        TypeInfo::U8 | TypeInfo::U16 | TypeInfo::U32 | TypeInfo::U64 | TypeInfo::U128);
+                    if unsigned {
+                        return Ok(LoweredValue::Value((*value).into()));
+                    }
+                    let zero = value.get_type().const_zero();
+                    let negative = builder.build_int_compare(IntPredicate::SLT, *value, zero, "abs_neg")
+                        .map_err(|e| format!("failed to build integer abs comparison: {:?}", e))?;
+                    let negated = builder.build_int_neg(*value, "abs_negated")
+                        .map_err(|e| format!("failed to build integer abs negation: {:?}", e))?;
+                    Ok(LoweredValue::Value(builder.build_select(negative, negated, *value, "abs")
+                        .map_err(|e| format!("failed to build integer abs select: {:?}", e))?))
+                }
+                _ => Err(format!("intrinsic {:?} requires a numeric argument", intrinsic)),
+            },
+
+            Intrinsic::Min | Intrinsic::Max => match (&values[0], &values[1]) {
+                (BasicValueEnum::FloatValue(lhs), BasicValueEnum::FloatValue(rhs)) => {
+                    let predicate = if matches!(intrinsic, Intrinsic::Min) { FloatPredicate::OLT } else { FloatPredicate::OGT };
+                    let choose_lhs = builder.build_float_compare(predicate, *lhs, *rhs, "minmax_cmp")
+                        .map_err(|e| format!("failed to build min/max comparison: {:?}", e))?;
+                    Ok(LoweredValue::Value(builder.build_select(choose_lhs, *lhs, *rhs, "minmax")
+                        .map_err(|e| format!("failed to build min/max select: {:?}", e))?))
+                }
+                (BasicValueEnum::IntValue(lhs), BasicValueEnum::IntValue(rhs)) => {
+                    let unsigned = matches!(expected_type,
+                        TypeInfo::U8 | TypeInfo::U16 | TypeInfo::U32 | TypeInfo::U64 | TypeInfo::U128);
+                    let predicate = match (matches!(intrinsic, Intrinsic::Min), unsigned) {
+                        (true, true) => IntPredicate::ULT,
+                        (true, false) => IntPredicate::SLT,
+                        (false, true) => IntPredicate::UGT,
+                        (false, false) => IntPredicate::SGT,
+                    };
+                    let choose_lhs = builder.build_int_compare(predicate, *lhs, *rhs, "minmax_cmp")
+                        .map_err(|e| format!("failed to build min/max comparison: {:?}", e))?;
+                    Ok(LoweredValue::Value(builder.build_select(choose_lhs, *lhs, *rhs, "minmax")
+                        .map_err(|e| format!("failed to build min/max select: {:?}", e))?))
+                }
+                _ => Err(format!("intrinsic {:?} requires matching numeric arguments", intrinsic)),
+            },
+
+            Intrinsic::Tan => {
+                let value = match values[0] { BasicValueEnum::FloatValue(value) => value, _ => return Err("tan requires f32 or f64".into()) };
+                let sin = self.build_float_unary_intrinsic(context, builder, function, "llvm.sin", value)?;
+                let cos = self.build_float_unary_intrinsic(context, builder, function, "llvm.cos", value)?;
+                Ok(LoweredValue::Value(builder.build_float_div(sin, cos, "tan")
+                    .map_err(|e| format!("failed to build tan: {:?}", e))?.into()))
+            }
+
+            Intrinsic::Pow => {
+                let lhs = match values[0] { BasicValueEnum::FloatValue(value) => value, _ => return Err("pow requires f32 or f64".into()) };
+                let rhs = match values[1] { BasicValueEnum::FloatValue(value) => value, _ => return Err("pow requires f32 or f64".into()) };
+                Ok(LoweredValue::Value(self.build_float_binary_intrinsic(context, builder, function, "llvm.pow", lhs, rhs)?.into()))
+            }
+
+            Intrinsic::Sqrt | Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Exp | Intrinsic::Log |
+            Intrinsic::Floor | Intrinsic::Ceil | Intrinsic::Round => {
+                let value = match values[0] { BasicValueEnum::FloatValue(value) => value, _ => return Err(format!("intrinsic {:?} requires f32 or f64", intrinsic)) };
+                let name = match intrinsic {
+                    Intrinsic::Sqrt => "llvm.sqrt",
+                    Intrinsic::Sin => "llvm.sin",
+                    Intrinsic::Cos => "llvm.cos",
+                    Intrinsic::Exp => "llvm.exp",
+                    Intrinsic::Log => "llvm.log",
+                    Intrinsic::Floor => "llvm.floor",
+                    Intrinsic::Ceil => "llvm.ceil",
+                    Intrinsic::Round => "llvm.round",
+                    _ => unreachable!(),
+                };
+                Ok(LoweredValue::Value(self.build_float_unary_intrinsic(context, builder, function, name, value)?.into()))
+            }
+        }
+    }
+
+    fn build_float_unary_intrinsic(
+        &self,
+        context: &'ctx Context,
+        builder: &Builder<'ctx>,
+        function: FunctionValue<'ctx>,
+        base_name: &str,
+        value: FloatValue<'ctx>,
+    ) -> Result<FloatValue<'ctx>, String> {
+        let suffix = if value.get_type() == context.f32_type() { ".f32" } else { ".f64" };
+        let name = format!("{}{}", base_name, suffix);
+        let module = function.get_parent().ok_or_else(|| "function has no parent module".to_string())?;
+        let float_type = value.get_type();
+        let fn_type = float_type.fn_type(&[float_type.into()], false);
+        let intrinsic = module.get_function(&name).unwrap_or_else(|| module.add_function(&name, fn_type, None));
+        let call = builder.build_call(intrinsic, &[value.into()], base_name)
+            .map_err(|e| format!("failed to build {} intrinsic: {:?}", base_name, e))?;
+        call.try_as_basic_value().left().map(|result| result.into_float_value())
+            .ok_or_else(|| format!("{} returned no floating-point value", base_name))
+    }
+
+    fn build_float_binary_intrinsic(
+        &self,
+        context: &'ctx Context,
+        builder: &Builder<'ctx>,
+        function: FunctionValue<'ctx>,
+        base_name: &str,
+        lhs: FloatValue<'ctx>,
+        rhs: FloatValue<'ctx>,
+    ) -> Result<FloatValue<'ctx>, String> {
+        let suffix = if lhs.get_type() == context.f32_type() { ".f32" } else { ".f64" };
+        let name = format!("{}{}", base_name, suffix);
+        let module = function.get_parent().ok_or_else(|| "function has no parent module".to_string())?;
+        let float_type = lhs.get_type();
+        let fn_type = float_type.fn_type(&[float_type.into(), float_type.into()], false);
+        let intrinsic = module.get_function(&name).unwrap_or_else(|| module.add_function(&name, fn_type, None));
+        let call = builder.build_call(intrinsic, &[lhs.into(), rhs.into()], base_name)
+            .map_err(|e| format!("failed to build {} intrinsic: {:?}", base_name, e))?;
+        call.try_as_basic_value().left().map(|result| result.into_float_value())
+            .ok_or_else(|| format!("{} returned no floating-point value", base_name))
+    }
+
+'''
+          if marker not in s:
+              raise SystemExit("lowering tuple marker not found")
+          p.write_text(s.replace(marker, implementation + marker, 1))
+
+      - name: Run workspace tests
+        run: cargo test --workspace
+
+      - name: Commit implementation
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          rm -f .github/workflows/intrinsics-ci.yml .github/workflows/run-intrinsics.yml .github/workflows/finish-intrinsics.yml
+          git add closure-ir/src/lowering.rs .github/workflows/intrinsics-ci.yml .github/workflows/run-intrinsics.yml .github/workflows/finish-intrinsics.yml
+          git commit -m "Implement intrinsic lowering" || exit 0
+          git push origin add-intrinsics
