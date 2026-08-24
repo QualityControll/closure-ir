@@ -17,8 +17,8 @@ pub(crate) fn lower_call(
     };
     let name = intrinsic_name(function)?;
     let required_args = match name.as_str() {
-        "abs" | "sqrt" => 1,
-        "min" | "max" | "pow" => 2,
+        "abs" => 1,
+        "min" | "max" => 2,
         _ => return Err(syn::Error::new_spanned(function, "unsupported intrinsic function")),
     };
     if call.args.len() != required_args {
@@ -58,7 +58,6 @@ pub(crate) fn lower_call(
                 }
             })
         }
-        "sqrt" | "pow" => Err(syn::Error::new_spanned(function, "sqrt and pow are reserved for a future LLVM intrinsic implementation")),
         _ => unreachable!(),
     }
 }
