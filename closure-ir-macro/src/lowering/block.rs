@@ -23,12 +23,28 @@ fn lower_statements(statements: &[Stmt], arguments: &[ClosureArgument], locals: 
                     _ => return Err(syn::Error::new_spanned(&local.pat, "let bindings must use identifiers")),
                 };
                 let initializer = local.init.as_ref().ok_or_else(|| syn::Error::new_spanned(local, "let bindings require an initializer"))?;
-                let local_type = explicit_type.or_else(|| expression_type(&initializer.expr, arguments, &current_locals)).ok_or_else(|| syn::Error::new_spanned(&initializer.expr, "cannot infer local variable type"))?;
-                let value = lower_expr(&initializer.expr, arguments, &current_locals, Some(&local_type))?;
+                let inferred_type = explicit_type.or_else(|| expression_type(&initializer.expr, arguments, &current_locals));
+                let value = lower_expr(&initializer.expr, arguments, &current_locals, inferred_type.as_ref())?;
                 let index = current_locals.len();
-                let type_info = quote! { <#local_type as ::closure_ir::CompileType>::type_info() };
+                let type_info = match &inferred_type {
+                    Some(local_type) => quote! { <#local_type as ::closure_ir::CompileType>::type_info() },
+                    None => {
+                        let initializer_expr = &initializer.expr;
+                        let helper = match arguments.len() {
+                            0 => quote! { ::closure_ir::type_info_of(|| #initializer_expr) },
+                            1 => {
+                                let argument = &arguments[0];
+                                let name = &argument.name;
+                                let ty = &argument.type_info;
+                                quote! { ::closure_ir::type_info_of1(|#name: #ty| #initializer_expr) }
+                            }
+                            _ => return Err(syn::Error::new_spanned(&initializer.expr, "cannot infer local variable type for closures with more than one argument")),
+                        };
+                        helper
+                    }
+                };
                 statement_tokens.push(quote! { ::closure_ir::Statement::Let { local: #index, type_info: #type_info, value: #value, mutable: #mutable } });
-                current_locals.push(LocalVariable { name, index, type_info: Some(local_type), mutable });
+                current_locals.push(LocalVariable { name, index, type_info: inferred_type, mutable });
             }
             Stmt::Expr(expr, _) => {
                 if let syn::Expr::While(while_expr) = expr { let condition = lower_expr(&while_expr.cond, arguments, &current_locals, Some(&syn::parse_quote!(bool)))?; let body = lower_block(&while_expr.body, arguments, &current_locals, None)?; statement_tokens.push(quote! { ::closure_ir::Statement::While { condition: #condition, body: #body } }); continue; }
