@@ -136,7 +136,7 @@ impl<'ctx> Lowering {
 
             Expr::Intrinsic {
                 intrinsic,
-                arguments,
+                arguments: intrinsic_arguments,
             } =>
                 self.lower_intrinsic(
                     context,
@@ -146,7 +146,7 @@ impl<'ctx> Lowering {
                     argument_types,
                     expected_type,
                     *intrinsic,
-                    arguments,
+                    intrinsic_arguments,
                 ),
 
             Expr::IfElse {
