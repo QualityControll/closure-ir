@@ -24,7 +24,6 @@ jobs:
           from pathlib import Path
           p = Path('closure-ir/src/lowering.rs')
           s = p.read_text()
-
           old = '''            Expr::Neg { operand } =>
                 self.lower_unary(
                     context,
@@ -120,8 +119,8 @@ jobs:
                 Ok(LoweredValue::Value(result))
             }
             Intrinsic::Tan => {
-                let sin = self.build_float_intrinsic(context, function, "llvm.sin", values[0], float_type)?;
-                let cos = self.build_float_intrinsic(context, function, "llvm.cos", values[0], float_type)?;
+                let sin = self.build_float_intrinsic(context, builder, function, "llvm.sin", values[0], float_type)?;
+                let cos = self.build_float_intrinsic(context, builder, function, "llvm.cos", values[0], float_type)?;
                 Ok(LoweredValue::Value(builder.build_float_div(sin, cos, "tan").map_err(|e| format!("failed to build tan: {:?}", e))?.into()))
             }
             _ => {
@@ -138,9 +137,9 @@ jobs:
                     _ => unreachable!(),
                 };
                 let result = if matches!(intrinsic, Intrinsic::Pow) {
-                    self.build_float_binary_intrinsic(context, function, name, values[0], values[1], float_type)?
+                    self.build_float_binary_intrinsic(context, builder, function, name, values[0], values[1], float_type)?
                 } else {
-                    self.build_float_intrinsic(context, function, name, values[0], float_type)?
+                    self.build_float_intrinsic(context, builder, function, name, values[0], float_type)?
                 };
                 Ok(LoweredValue::Value(result.into()))
             }
@@ -150,6 +149,7 @@ jobs:
     fn build_float_intrinsic(
         &self,
         context: &'ctx Context,
+        builder: &Builder<'ctx>,
         function: FunctionValue<'ctx>,
         base_name: &str,
         value: FloatValue<'ctx>,
@@ -160,13 +160,18 @@ jobs:
         let module = function.get_parent().ok_or_else(|| "function has no parent module".to_string())?;
         let fn_type = float_type.fn_type(&[float_type.into()], false);
         let intrinsic = module.get_function(&name).unwrap_or_else(|| module.add_function(&name, fn_type, None));
-        let call = self.builder_call(function, intrinsic, &[value.into()], base_name)?;
-        call.try_as_basic_value().left().and_then(|v| v.into_float_value().ok()).ok_or_else(|| format!("{} returned no floating-point value", base_name))
+        let call = builder.build_call(intrinsic, &[value.into()], base_name)
+            .map_err(|e| format!("failed to build {} intrinsic: {:?}", base_name, e))?;
+        match call.try_as_basic_value().left() {
+            Some(result) => Ok(result.into_float_value()),
+            None => Err(format!("{} returned no floating-point value", base_name)),
+        }
     }
 
     fn build_float_binary_intrinsic(
         &self,
         context: &'ctx Context,
+        builder: &Builder<'ctx>,
         function: FunctionValue<'ctx>,
         base_name: &str,
         lhs: FloatValue<'ctx>,
@@ -178,25 +183,12 @@ jobs:
         let module = function.get_parent().ok_or_else(|| "function has no parent module".to_string())?;
         let fn_type = float_type.fn_type(&[float_type.into(), float_type.into()], false);
         let intrinsic = module.get_function(&name).unwrap_or_else(|| module.add_function(&name, fn_type, None));
-        let call = self.builder_call(function, intrinsic, &[lhs.into(), rhs.into()], base_name)?;
-        call.try_as_basic_value().left().and_then(|v| v.into_float_value().ok()).ok_or_else(|| format!("{} returned no floating-point value", base_name))
-    }
-
-    fn builder_call(
-        &self,
-        function: FunctionValue<'ctx>,
-        callee: FunctionValue<'ctx>,
-        args: &[inkwell::values::BasicMetadataValueEnum<'ctx>],
-        name: &str,
-    ) -> Result<inkwell::values::CallSiteValue<'ctx>, String> {
-        let entry = function.get_entry_basic_block().ok_or_else(|| "function has no entry block".to_string())?;
-        let builder = function.get_context().create_builder();
-        builder.position_at_end(function.get_last_basic_block().ok_or_else(|| "function has no basic block".to_string())?);
-        let result = builder.build_call(callee, args, name).map_err(|e| format!("failed to build {} intrinsic: {:?}", name, e));
-        if let Some(block) = builder.get_insert_block() {
-            let _ = block;
+        let call = builder.build_call(intrinsic, &[lhs.into(), rhs.into()], base_name)
+            .map_err(|e| format!("failed to build {} intrinsic: {:?}", base_name, e))?;
+        match call.try_as_basic_value().left() {
+            Some(result) => Ok(result.into_float_value()),
+            None => Err(format!("{} returned no floating-point value", base_name)),
         }
-        result
     }
 '''
           if old not in s:
