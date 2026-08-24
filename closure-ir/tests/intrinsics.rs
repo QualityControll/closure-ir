@@ -58,7 +58,7 @@ fn test_pow() {
 
 #[test]
 fn test_f32_intrinsics() {
-    let compiled = compile_closure!(|x: f32| -> f32 { sqrt(x) + abs(x) });
+    let compiled = compile_closure!(|x: f32| -> f32 { sqrt(abs(x)) + abs(x) });
     let value = call!(compiled, -4.0_f32);
     assert!((value - 6.0).abs() < 1e-6);
 }
