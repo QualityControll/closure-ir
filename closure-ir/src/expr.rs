@@ -4,11 +4,24 @@ use crate::value::Value;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum Intrinsic {
+    Sqrt,
+    Sin,
+    Cos,
+    Exp,
+    Log,
+    Abs,
+    Min,
+    Max,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Expr {
     Argument(usize),
     Constant(Value),
     Field { object: Box<Expr>, name: String },
     Tuple { elements: Vec<Expr> },
+    Intrinsic { intrinsic: Intrinsic, arguments: Vec<Expr> },
     Add { lhs: Box<Expr>, rhs: Box<Expr> },
     Sub { lhs: Box<Expr>, rhs: Box<Expr> },
     Mul { lhs: Box<Expr>, rhs: Box<Expr> },
