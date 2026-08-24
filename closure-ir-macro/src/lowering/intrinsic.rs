@@ -17,8 +17,8 @@ pub(crate) fn lower_call(
     };
     let name = intrinsic_name(function)?;
     let required_args = match name.as_str() {
-        "abs" => 1,
-        "min" | "max" => 2,
+        "abs" | "sqrt" => 1,
+        "min" | "max" | "pow" => 2,
         _ => return Err(syn::Error::new_spanned(function, "unsupported intrinsic function")),
     };
     if call.args.len() != required_args {
@@ -58,6 +58,25 @@ pub(crate) fn lower_call(
                 }
             })
         }
+        "sqrt" => {
+            let arg = &lowered[0];
+            let arg_type = expression_type(&call.args[0], arguments, locals).ok_or_else(|| syn::Error::new_spanned(&call.args[0], "cannot determine sqrt argument type"))?;
+            match numeric_type_name(&arg_type).as_deref() {
+                Some("f32") => Ok(quote! { ::closure_ir::Expr::SqrtF32 { operand: Box::new(#arg) } }),
+                Some("f64") => Ok(quote! { ::closure_ir::Expr::SqrtF64 { operand: Box::new(#arg) } }),
+                _ => Err(syn::Error::new_spanned(&call.args[0], "sqrt requires f32 or f64")),
+            }
+        }
+        "pow" => {
+            let lhs = &lowered[0];
+            let rhs = &lowered[1];
+            let lhs_type = expression_type(&call.args[0], arguments, locals).ok_or_else(|| syn::Error::new_spanned(&call.args[0], "cannot determine pow base type"))?;
+            match numeric_type_name(&lhs_type).as_deref() {
+                Some("f32") => Ok(quote! { ::closure_ir::Expr::PowF32 { lhs: Box::new(#lhs), rhs: Box::new(#rhs) } }),
+                Some("f64") => Ok(quote! { ::closure_ir::Expr::PowF64 { lhs: Box::new(#lhs), rhs: Box::new(#rhs) } }),
+                _ => Err(syn::Error::new_spanned(&call.args[0], "pow requires an f32 or f64 base")),
+            }
+        }
         _ => unreachable!(),
     }
 }
@@ -69,8 +88,16 @@ fn intrinsic_name(path: &ExprPath) -> syn::Result<String> {
     Ok(path.path.segments[0].ident.to_string())
 }
 
+fn numeric_type_name(ty: &Type) -> Option<String> {
+    let rendered = quote!(#ty).to_string().replace(' ', "");
+    match rendered.as_str() {
+        "f32" | "f64" | "i8" | "i16" | "i32" | "i64" | "i128" | "u8" | "u16" | "u32" | "u64" | "u128" => Some(rendered),
+        _ => None,
+    }
+}
+
 fn zero_value(ty: &Type, span: &syn::Expr) -> syn::Result<TokenStream> {
-    let ty = quote!(#ty).to_string().replace(' ', "");
+    let ty = numeric_type_name(ty).unwrap_or_default();
     let value = match ty.as_str() {
         "f32" => quote! { ::closure_ir::Value::F32(0.0) },
         "f64" => quote! { ::closure_ir::Value::F64(0.0) },
