@@ -1,4 +1,4 @@
-use crate::expr::Expr;
+use crate::expr::{Expr, Intrinsic};
 use crate::types::{TypeInfo, FieldInfo};
 use crate::value::Value;
 
@@ -24,6 +24,40 @@ pub(crate) fn expression_type(argument_types: &[TypeInfo], expr: &Expr) -> Resul
         Expr::Tuple { elements } => {
             let fields = elements.iter().enumerate().map(|(index, element)| Ok(FieldInfo { name: index.to_string(), type_info: expression_type(argument_types, element)? })).collect::<Result<Vec<_>, String>>()?;
             Ok(TypeInfo::Struct { name: "tuple".to_string(), fields })
+        }
+        Expr::Intrinsic { intrinsic, arguments } => {
+            let arity = match intrinsic {
+                Intrinsic::Min | Intrinsic::Max | Intrinsic::Pow => 2,
+                _ => 1,
+            };
+            if arguments.len() != arity {
+                return Err(format!("intrinsic {:?} expects {} argument(s)", intrinsic, arity));
+            }
+
+            let first_type = expression_type(argument_types, &arguments[0])?;
+            if !first_type.is_numeric() {
+                return Err(format!("intrinsic {:?} requires numeric arguments", intrinsic));
+            }
+
+            for argument in &arguments[1..] {
+                let argument_type = expression_type(argument_types, argument)?;
+                if argument_type != first_type {
+                    return Err(format!("intrinsic {:?} arguments must have the same type", intrinsic));
+                }
+            }
+
+            match intrinsic {
+                Intrinsic::Sqrt | Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Tan |
+                Intrinsic::Exp | Intrinsic::Log | Intrinsic::Floor | Intrinsic::Ceil |
+                Intrinsic::Round | Intrinsic::Pow => {
+                    if !first_type.is_float() {
+                        return Err(format!("intrinsic {:?} requires f32 or f64", intrinsic));
+                    }
+                }
+                Intrinsic::Abs | Intrinsic::Min | Intrinsic::Max => {}
+            }
+
+            Ok(first_type)
         }
         Expr::Add { lhs, .. } | Expr::Sub { lhs, .. } | Expr::Mul { lhs, .. } | Expr::Div { lhs, .. } | Expr::Rem { lhs, .. } | Expr::BitAnd { lhs, .. } | Expr::BitOr { lhs, .. } | Expr::BitXor { lhs, .. } | Expr::Shl { lhs, .. } | Expr::Shr { lhs, .. } | Expr::Neg { operand: lhs } => expression_type(argument_types, lhs),
         Expr::Eq { .. } | Expr::Ne { .. } | Expr::Lt { .. } | Expr::Le { .. } | Expr::Gt { .. } | Expr::Ge { .. } | Expr::And { .. } | Expr::Or { .. } | Expr::Not { .. } => Ok(TypeInfo::Bool),
