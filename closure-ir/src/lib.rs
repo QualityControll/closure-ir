@@ -2,6 +2,7 @@ mod compiler;
 mod expr;
 mod jit;
 mod lowering;
+mod mlir_lowering;
 mod mlir_types;
 mod operators;
 mod statement_lowering;
