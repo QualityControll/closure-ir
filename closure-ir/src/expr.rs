@@ -25,3 +25,5 @@ pub enum Statement { Let { local: usize, type_info: TypeInfo, value: Expr, mutab
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Block { pub statements: Vec<Statement>, pub result: Option<Expr> }
 impl Block { pub fn expression(result: Expr) -> Self { Self { statements: Vec::new(), result: Some(result) } } pub fn statements(statements: Vec<Statement>) -> Self { Self { statements, result: None } } }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Closure { pub arguments: Vec<TypeInfo>, pub return_type: TypeInfo, pub body: Block }
