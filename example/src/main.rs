@@ -30,8 +30,8 @@ fn main() {
     println!("Input: {:?}", values);
 
     let compiled = compile_closure!(
-        |values: &mut [Complex], count: usize| -> usize {
-            for i in 0..count {
+        |values: &mut [Complex]| -> usize {
+            for i in 0..values.len() {
                 let z: Complex = values[i];
                 let denominator: f64 = z.re * z.re + z.im * z.im;
 
@@ -50,13 +50,12 @@ fn main() {
                 values[i] = result;
             }
 
-            count
+            values.len()
         }
     );
 
-    let count = values.len();
-    let processed = call!(compiled, &mut values[..], count);
-    assert_eq!(processed, count);
+    let processed = call!(compiled, &mut values[..]);
+    assert_eq!(processed, values.len());
 
     println!("JIT result: {:?}", values);
 

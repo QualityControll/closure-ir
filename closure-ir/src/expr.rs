@@ -10,6 +10,7 @@ pub enum Expr {
     Argument(usize), Constant(Value),
     Cast { expr: Box<Expr>, source_type: TypeInfo, target_type: TypeInfo },
     Index { sequence: Box<Expr>, index: Box<Expr> },
+    Len { sequence: Box<Expr> },
     Field { object: Box<Expr>, name: String },
     Struct { type_info: TypeInfo, fields: Vec<(String, Expr)> },
     Tuple { elements: Vec<Expr> },
