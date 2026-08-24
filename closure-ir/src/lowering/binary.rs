@@ -2,7 +2,7 @@ use inkwell::{builder::Builder, context::Context, values::{BasicValueEnum, Float
 use crate::{expr::Expr, operators::{binary_operand_type, BinaryOp}, types::TypeInfo};
 use super::{LoweredValue, Lowering};
 
-impl<'ctx> Lowering {
+impl Lowering {
     pub(crate) fn lower_binary(
         &self,
         context: &'ctx Context,
