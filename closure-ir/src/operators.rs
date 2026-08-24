@@ -15,6 +15,13 @@ pub(crate) fn expression_type(argument_types: &[TypeInfo], expr: &Expr) -> Resul
             Value::U8(_) => TypeInfo::U8, Value::U16(_) => TypeInfo::U16, Value::U32(_) => TypeInfo::U32, Value::U64(_) => TypeInfo::U64, Value::U128(_) => TypeInfo::U128, Value::Usize(_) => TypeInfo::Usize, Value::Bool(_) => TypeInfo::Bool,
             Value::Array(values) => { let first = values.first().ok_or("empty array constants are not supported")?; TypeInfo::Array { element: Box::new(expression_type(argument_types, &Expr::Constant(first.clone()))?), length: values.len() } }
         }),
+        Expr::Cast { expr, source_type, target_type } => {
+            let actual_source_type = expression_type(argument_types, expr)?;
+            if actual_source_type != *source_type {
+                return Err(format!("cast source type mismatch: expression has type {:?}, cast declares {:?}", actual_source_type, source_type));
+            }
+            Ok(target_type.clone())
+        }
         Expr::Index { sequence, index } => {
             let sequence_type = expression_type(argument_types, sequence)?;
             let index_type = expression_type(argument_types, index)?;
