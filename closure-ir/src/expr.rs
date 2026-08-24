@@ -3,16 +3,21 @@ use crate::value::Value;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Intrinsic {
     Sqrt,
     Sin,
     Cos,
+    Tan,
     Exp,
     Log,
     Abs,
     Min,
     Max,
+    Floor,
+    Ceil,
+    Round,
+    Pow,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
