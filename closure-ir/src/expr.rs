@@ -8,6 +8,7 @@ pub enum Intrinsic { Sqrt, Abs, Min, Max, Floor, Ceil, Round, Sin, Cos, Tan, Exp
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Expr {
     Argument(usize), Constant(Value),
+    Cast { expr: Box<Expr>, source_type: TypeInfo, target_type: TypeInfo },
     Index { sequence: Box<Expr>, index: Box<Expr> },
     Field { object: Box<Expr>, name: String }, Tuple { elements: Vec<Expr> },
     Intrinsic { intrinsic: Intrinsic, arguments: Vec<Expr> },
