@@ -17,7 +17,7 @@ impl<'ctx> Compiler<'ctx> {
         let engine = module.create_jit_execution_engine(OptimizationLevel::None).map_err(|error| format!("failed to create JIT: {:?}", error))?;
         Ok(DynamicCompiledClosure::new(engine, function_name.to_string(), closure.arguments.clone(), closure.return_type.clone()))
     }
-    fn generate_function(&self, context: &'ctx Context, module: &Module<'ctx>, function_name: &str, closure: &Closure) -> Result<(), String> {
+    fn generate_function(&self, context: &'ctx Context, module: &'ctx Module<'ctx>, function_name: &str, closure: &Closure) -> Result<(), String> {
         let pointer_type = context.ptr_type(AddressSpace::default()); let function_type = context.void_type().fn_type(&[pointer_type.into(), pointer_type.into()], false); let function = module.add_function(function_name, function_type, None);
         let entry = context.append_basic_block(function, "entry"); let builder = context.create_builder(); builder.position_at_end(entry);
         let argument_pointer = function.get_nth_param(0).ok_or_else(|| "missing function argument".to_string())?.into_pointer_value(); let result_pointer = function.get_nth_param(1).ok_or_else(|| "missing result pointer".to_string())?.into_pointer_value();
@@ -25,12 +25,12 @@ impl<'ctx> Compiler<'ctx> {
         builder.build_store(result_pointer, value).map_err(|error| format!("failed to store return value: {:?}", error))?; builder.build_return(None).map_err(|error| format!("failed to build return: {:?}", error))?;
         if function.verify(true) { Ok(()) } else { Err("LLVM function verification failed".to_string()) }
     }
-    fn generate_dynamic_function(&self, context: &'ctx Context, module: &Module<'ctx>, function_name: &str, closure: &Closure) -> Result<(), String> {
+    fn generate_dynamic_function(&self, context: &'ctx Context, module: &'ctx Module<'ctx>, function_name: &str, closure: &Closure) -> Result<(), String> {
         let pointer_type = context.ptr_type(AddressSpace::default()); let function_type = context.void_type().fn_type(&[pointer_type.into(), pointer_type.into()], false); let function = module.add_function(function_name, function_type, None);
         let entry = context.append_basic_block(function, "entry"); let builder = context.create_builder(); builder.position_at_end(entry);
         let argument_array = function.get_nth_param(0).ok_or_else(|| "missing dynamic argument array".to_string())?.into_pointer_value(); let result_pointer = function.get_nth_param(1).ok_or_else(|| "missing result pointer".to_string())?.into_pointer_value();
         let arguments = self.build_dynamic_argument_pointers(context, &builder, argument_array, &closure.arguments)?; let value = lower_closure_block(context, module, &builder, function, &arguments, &closure.arguments, &closure.return_type, &closure.body)?;
-        builder.build_store(result_pointer, value).map_err(|error| format!("failed to store dynamic return value: {:?}", error))?; builder.build_return(None).map_err(|error| format!("failed to build return: {:?}", error))?;
+        builder.build_store(result_pointer, value).map_err(|error| format!("failed to store return value: {:?}", error))?; builder.build_return(None).map_err(|error| format!("failed to build return: {:?}", error))?;
         if function.verify(true) { Ok(()) } else { Err("LLVM dynamic function verification failed".to_string()) }
     }
     fn build_argument_pointers(&self, context: &'ctx Context, builder: &Builder<'ctx>, argument_pointer: PointerValue<'ctx>, argument_types: &[TypeInfo]) -> Result<Vec<PointerValue<'ctx>>, String> {
