@@ -1,13 +1,16 @@
 use inkwell::{
     builder::Builder,
     context::Context,
+    module::Module,
     types::BasicTypeEnum,
     values::{BasicValueEnum, FunctionValue, PointerValue},
 };
 
-use crate::{expr::Expr, types::TypeInfo};
+use crate::{expr::{Expr, Intrinsic}, types::TypeInfo};
 
-pub(crate) struct Lowering;
+pub(crate) struct Lowering<'ctx> {
+    pub(crate) module: &'ctx Module<'ctx>,
+}
 
 pub(crate) enum LoweredValue<'ctx> {
     Value(BasicValueEnum<'ctx>),
@@ -21,11 +24,12 @@ mod binary;
 mod control;
 mod field;
 mod constant;
+mod intrinsic;
 mod materialize;
 mod unary;
 mod tuple;
 
-impl<'ctx> Lowering {
+impl<'ctx> Lowering<'ctx> {
     pub(crate) fn lower_expr(
         &self,
         context: &'ctx Context,
@@ -52,6 +56,10 @@ impl<'ctx> Lowering {
             Expr::Tuple { elements } => self.lower_tuple(
                 context, builder, function, arguments, argument_types,
                 expected_type, elements,
+            ),
+            Expr::Intrinsic { intrinsic, arguments: intrinsic_arguments } => self.lower_intrinsic(
+                context, builder, function, arguments, argument_types,
+                expected_type, *intrinsic, intrinsic_arguments,
             ),
             Expr::IfElse { condition, then_branch, else_branch } => self.lower_if_else(
                 context, builder, function, arguments, argument_types,
