@@ -7,5 +7,5 @@ use closure_ir::{call, compile_closure};
 #[test] fn test_sin_cos_tan() { let sin = compile_closure!(|x: f64| -> f64 { sin(x) }); let cos = compile_closure!(|x: f64| -> f64 { cos(x) }); let tan = compile_closure!(|x: f64| -> f64 { tan(x) }); assert!((call!(sin, 0.0)).abs() < 1e-12); assert!((call!(cos, 0.0) - 1.0).abs() < 1e-12); assert!((call!(tan, 0.0)).abs() < 1e-12); }
 #[test] fn test_exp_log() { let exp = compile_closure!(|x: f64| -> f64 { exp(x) }); let log = compile_closure!(|x: f64| -> f64 { log(x) }); assert!((call!(exp, 1.0) - std::f64::consts::E).abs() < 1e-12); assert!((call!(log, std::f64::consts::E) - 1.0).abs() < 1e-12); }
 #[test] fn test_pow() { let compiled = compile_closure!(|x: f64| -> f64 { pow(x, 2.0) }); assert!((call!(compiled, 3.0) - 9.0).abs() < 1e-12); }
-#[test] fn test_f32_intrinsics() { let compiled = compile_closure!(|x: f32| -> f32 { sqrt(x) + abs(x) }); let value = call!(compiled, -4.0_f32); assert!((value - 6.0).abs() < 1e-6); }
+#[test] fn test_f32_intrinsics() { let compiled = compile_closure!(|x: f32| -> f32 { sqrt(x) + abs(x) }); let value = call!(compiled, 4.0_f32); assert!((value - 6.0).abs() < 1e-6); }
 #[test] fn test_nested_intrinsics() { let compiled = compile_closure!(|x: f64| -> f64 { pow(sqrt(abs(x)), 2.0) }); assert!((call!(compiled, -16.0) - 16.0).abs() < 1e-12); }
