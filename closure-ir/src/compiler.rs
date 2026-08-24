@@ -39,7 +39,7 @@ impl<'ctx> Compiler<'ctx> {
         let argument_pointer = function.get_nth_param(0).ok_or_else(|| "missing function argument".to_string())?.into_pointer_value();
         let result_pointer = function.get_nth_param(1).ok_or_else(|| "missing result pointer".to_string())?.into_pointer_value();
         let arguments = self.build_argument_pointers(context, &builder, argument_pointer, &closure.arguments)?;
-        let value = lower_closure_block(context, &builder, function, &arguments, &closure.arguments, &closure.return_type, &closure.body)?;
+        let value = lower_closure_block(context, module, &builder, function, &arguments, &closure.arguments, &closure.return_type, &closure.body)?;
         builder.build_store(result_pointer, value).map_err(|error| format!("failed to store return value: {:?}", error))?;
         builder.build_return(None).map_err(|error| format!("failed to build return: {:?}", error))?;
         if function.verify(true) { Ok(()) } else { Err("LLVM function verification failed".to_string()) }
@@ -55,7 +55,7 @@ impl<'ctx> Compiler<'ctx> {
         let argument_array = function.get_nth_param(0).ok_or_else(|| "missing dynamic argument array".to_string())?.into_pointer_value();
         let result_pointer = function.get_nth_param(1).ok_or_else(|| "missing dynamic result pointer".to_string())?.into_pointer_value();
         let arguments = self.build_dynamic_argument_pointers(context, &builder, argument_array, &closure.arguments)?;
-        let value = lower_closure_block(context, &builder, function, &arguments, &closure.arguments, &closure.return_type, &closure.body)?;
+        let value = lower_closure_block(context, module, &builder, function, &arguments, &closure.arguments, &closure.return_type, &closure.body)?;
         builder.build_store(result_pointer, value).map_err(|error| format!("failed to store dynamic return value: {:?}", error))?;
         builder.build_return(None).map_err(|error| format!("failed to build return: {:?}", error))?;
         if function.verify(true) { Ok(()) } else { Err("LLVM dynamic function verification failed".to_string()) }
