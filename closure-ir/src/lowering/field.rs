@@ -2,7 +2,7 @@ use inkwell::{builder::Builder, context::Context, values::{FunctionValue, Pointe
 use crate::{expr::Expr, types::TypeInfo};
 use super::{LoweredValue, Lowering};
 
-impl Lowering {
+impl<'ctx> Lowering {
     pub(crate) fn lower_field(&self, context: &'ctx Context, builder: &Builder<'ctx>, function: FunctionValue<'ctx>, arguments: &[PointerValue<'ctx>], argument_types: &[TypeInfo], expected_type: &TypeInfo, object: &Expr, name: &str) -> Result<LoweredValue<'ctx>, String> {
         let object = self.lower_expr(context, builder, function, arguments, argument_types, expected_type, object)?;
         let (object_pointer, object_type) = match object { LoweredValue::Pointer { pointer, type_info } => (pointer, type_info), LoweredValue::Value(_) => return Err(format!("cannot access field `{}` on a value", name)), };
