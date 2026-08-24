@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - add-arithmetic-intrinsics
+  pull_request:
+    branches:
+      - main
 
 jobs:
   test:
