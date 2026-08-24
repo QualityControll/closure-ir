@@ -53,3 +53,29 @@ fn test_single_element_slice_index_zero_is_valid() {
     let values: &[i32] = &[42];
     assert_eq!(call!(compiled, values), 42);
 }
+
+#[test]
+fn test_slice_len() {
+    let compiled = compile_closure!(|values: &[i32]| -> usize {
+        values.len()
+    });
+    let values: &[i32] = &[10, 20, 30, 40];
+    assert_eq!(call!(compiled, values), 4);
+}
+
+#[test]
+fn test_empty_slice_len() {
+    let compiled = compile_closure!(|values: &[i32]| -> usize {
+        values.len()
+    });
+    let values: &[i32] = &[];
+    assert_eq!(call!(compiled, values), 0);
+}
+
+#[test]
+fn test_array_len() {
+    let compiled = compile_closure!(|values: [i32; 4]| -> usize {
+        values.len()
+    });
+    assert_eq!(call!(compiled, [10, 20, 30, 40]), 4);
+}
