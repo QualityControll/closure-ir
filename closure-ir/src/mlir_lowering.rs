@@ -1,11 +1,12 @@
 use melior::{
-    dialect::{arith, func},
+    dialect::{arith, func, DialectRegistry},
     ir::{
         attribute::{FloatAttribute, IntegerAttribute, StringAttribute, TypeAttribute},
         operation::OperationLike,
         r#type::FunctionType,
         Block, BlockLike, Location, Module, Region, RegionLike, Type, Value,
     },
+    utility::register_all_dialects,
     Context,
 };
 
@@ -101,9 +102,6 @@ impl<'c> MlirLowerer<'c> {
 }
 
 pub(crate) fn lower_simple_closure<'c>(context: &'c Context, closure: &Closure) -> Result<Module<'c>, String> {
-    // This helper is intentionally kept lightweight. Dialects are registered by
-    // the caller/context setup; register_all_dialects expects a DialectRegistry,
-    // not a Context, in Melior 0.27.
     MlirLowerer::new(context).lower_simple_closure(closure)
 }
 
@@ -112,9 +110,18 @@ mod tests {
     use super::*;
     use crate::{expr::Block, types::TypeInfo, value::Value};
 
+    fn context() -> Context {
+        let registry = DialectRegistry::new();
+        register_all_dialects(&registry);
+        let context = Context::new();
+        context.append_dialect_registry(&registry);
+        context.load_all_available_dialects();
+        context
+    }
+
     #[test]
     fn lowers_argument_to_mlir_function() {
-        let context = Context::new();
+        let context = context();
         let closure = Closure { arguments: vec![TypeInfo::I32], return_type: TypeInfo::I32, body: Block::expression(Expr::Argument(0)) };
         let module = lower_simple_closure(&context, &closure).unwrap();
         let text = module.as_operation().to_string();
@@ -125,7 +132,7 @@ mod tests {
 
     #[test]
     fn lowers_integer_constant_to_mlir() {
-        let context = Context::new();
+        let context = context();
         let closure = Closure { arguments: vec![], return_type: TypeInfo::I32, body: Block::expression(Expr::Constant(Value::I32(42))) };
         let module = lower_simple_closure(&context, &closure).unwrap();
         let text = module.as_operation().to_string();
@@ -136,7 +143,7 @@ mod tests {
 
     #[test]
     fn lowers_float_constant_to_mlir() {
-        let context = Context::new();
+        let context = context();
         let closure = Closure { arguments: vec![], return_type: TypeInfo::F64, body: Block::expression(Expr::Constant(Value::F64(3.5))) };
         let module = lower_simple_closure(&context, &closure).unwrap();
         let text = module.as_operation().to_string();
