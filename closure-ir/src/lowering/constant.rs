@@ -1,6 +1,6 @@
 use crate::value::Value;
 use super::{LoweredValue, Lowering};
-use inkwell::{context::Context, types::BasicType, values::BasicValueEnum};
+use inkwell::{context::Context, types::BasicTypeEnum, values::BasicValueEnum};
 
 impl<'ctx> Lowering {
     pub(crate) fn lower_constant(
@@ -46,50 +46,31 @@ impl<'ctx> Lowering {
                     .first()
                     .ok_or("empty array constants are not supported")?;
 
-                match first {
-                    BasicValueEnum::Int(_) => {
-                        let values = elems
-                            .iter()
-                            .map(|v| v.into_int_value())
-                            .collect::<Vec<_>>();
-                        first.get_type().into_int_type().const_array(&values).into()
+                match first.get_type() {
+                    BasicTypeEnum::IntType(t) => {
+                        let values = elems.iter().map(|v| v.into_int_value()).collect::<Vec<_>>();
+                        t.const_array(&values).into()
                     }
-                    BasicValueEnum::Float(_) => {
-                        let values = elems
-                            .iter()
-                            .map(|v| v.into_float_value())
-                            .collect::<Vec<_>>();
-                        first.get_type().into_float_type().const_array(&values).into()
+                    BasicTypeEnum::FloatType(t) => {
+                        let values = elems.iter().map(|v| v.into_float_value()).collect::<Vec<_>>();
+                        t.const_array(&values).into()
                     }
-                    BasicValueEnum::Array(_) => {
-                        let values = elems
-                            .iter()
-                            .map(|v| v.into_array_value())
-                            .collect::<Vec<_>>();
-                        first.get_type().into_array_type().const_array(&values).into()
+                    BasicTypeEnum::ArrayType(t) => {
+                        let values = elems.iter().map(|v| v.into_array_value()).collect::<Vec<_>>();
+                        t.const_array(&values).into()
                     }
-                    BasicValueEnum::Struct(_) => {
-                        let values = elems
-                            .iter()
-                            .map(|v| v.into_struct_value())
-                            .collect::<Vec<_>>();
-                        first.get_type().into_struct_type().const_array(&values).into()
+                    BasicTypeEnum::StructType(t) => {
+                        let values = elems.iter().map(|v| v.into_struct_value()).collect::<Vec<_>>();
+                        t.const_array(&values).into()
                     }
-                    BasicValueEnum::Pointer(_) => {
-                        let values = elems
-                            .iter()
-                            .map(|v| v.into_pointer_value())
-                            .collect::<Vec<_>>();
-                        first.get_type().into_pointer_type().const_array(&values).into()
+                    BasicTypeEnum::PointerType(t) => {
+                        let values = elems.iter().map(|v| v.into_pointer_value()).collect::<Vec<_>>();
+                        t.const_array(&values).into()
                     }
-                    BasicValueEnum::Vector(_) => {
-                        let values = elems
-                            .iter()
-                            .map(|v| v.into_vector_value())
-                            .collect::<Vec<_>>();
-                        first.get_type().into_vector_type().const_array(&values).into()
+                    BasicTypeEnum::VectorType(t) => {
+                        let values = elems.iter().map(|v| v.into_vector_value()).collect::<Vec<_>>();
+                        t.const_array(&values).into()
                     }
-                    _ => return Err("unsupported array constant element type".into()),
                 }
             }
         };
