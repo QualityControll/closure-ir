@@ -21,20 +21,17 @@ jobs:
           version: "22.1.5"
           env: true
 
-      - name: Configure MLIR environment
+      - name: Install MLIR 22 development files
         run: |
-          echo "MLIR_PREFIX=${{ steps.llvm.outputs.prefix }}" >> "$GITHUB_ENV"
-          echo "MLIR_DIR=${{ steps.llvm.outputs.prefix }}/lib/cmake/mlir" >> "$GITHUB_ENV"
-          echo "MLIR_INCLUDE_DIR=${{ steps.llvm.outputs.prefix }}/include" >> "$GITHUB_ENV"
-          echo "MLIR_LIBRARY_DIR=${{ steps.llvm.outputs.prefix }}/lib" >> "$GITHUB_ENV"
-          echo "CMAKE_PREFIX_PATH=${{ steps.llvm.outputs.prefix }}:$CMAKE_PREFIX_PATH" >> "$GITHUB_ENV"
+          sudo apt-get update
+          sudo apt-get install -y libmlir-22-dev mlir-22-tools
 
-      - name: Verify MLIR installation
+      - name: Verify LLVM and MLIR installation
         run: |
-          test -d "$MLIR_DIR"
-          test -f "$MLIR_DIR/MLIRConfig.cmake"
-          test -f "$MLIR_INCLUDE_DIR/mlir-c/IR.h"
-          ls "$MLIR_LIBRARY_DIR"/libMLIR.so*
+          llvm-config --version
+          llvm-config --prefix
+          test -d /usr/lib/llvm-22/include/mlir-c
+          test -e /usr/lib/llvm-22/lib/libMLIR.so || test -e /usr/lib/llvm-22/lib/libMLIR.a
 
       - name: Cargo test
         run: cargo test
