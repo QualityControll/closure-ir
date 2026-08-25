@@ -14,11 +14,27 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install LLVM 22
+      - name: Install LLVM and MLIR 22
         uses: yasuo-ozu/llvm-full@v1
+        id: llvm
         with:
           version: "22.1.5"
           env: true
+
+      - name: Configure MLIR environment
+        run: |
+          echo "MLIR_PREFIX=${{ steps.llvm.outputs.prefix }}" >> "$GITHUB_ENV"
+          echo "MLIR_DIR=${{ steps.llvm.outputs.prefix }}/lib/cmake/mlir" >> "$GITHUB_ENV"
+          echo "MLIR_INCLUDE_DIR=${{ steps.llvm.outputs.prefix }}/include" >> "$GITHUB_ENV"
+          echo "MLIR_LIBRARY_DIR=${{ steps.llvm.outputs.prefix }}/lib" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=${{ steps.llvm.outputs.prefix }}:$CMAKE_PREFIX_PATH" >> "$GITHUB_ENV"
+
+      - name: Verify MLIR installation
+        run: |
+          test -d "$MLIR_DIR"
+          test -f "$MLIR_DIR/MLIRConfig.cmake"
+          test -f "$MLIR_INCLUDE_DIR/mlir-c/IR.h"
+          ls "$MLIR_LIBRARY_DIR"/libMLIR.so*
 
       - name: Cargo test
         run: cargo test
