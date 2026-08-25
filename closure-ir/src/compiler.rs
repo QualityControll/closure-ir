@@ -7,8 +7,8 @@ use crate::{expr::Closure, jit::{CompiledClosure, DynamicCompiledClosure}, types
 
 mod addresses;
 mod builder;
-mod control_flow;
 mod expr_lowering;
+mod statements;
 
 pub(crate) use builder::MlirBuilder;
 
