@@ -1,8 +1,8 @@
-# closure-ir
+# closure-pack
 
 A portable intermediate representation for Rust closures.
 
-`closure-ir` is an experimental Rust project that turns Rust closures into an intermediate representation (IR), then lowers that representation to **MLIR using the LLVM dialect** and JIT-compiles it through MLIR's LLVM translation and execution infrastructure.
+`closure-pack` is an experimental Rust project that turns Rust closures into an intermediate representation (IR), then lowers that representation to **MLIR using the LLVM dialect** and JIT-compiles it through MLIR's LLVM translation and execution infrastructure.
 
 The project explores a longer-term question: **can a Rust closure become a portable, serializable executable representation that can be transported to another execution environment and compiled there?**
 
@@ -22,7 +22,7 @@ function / AM ID + arguments
          execute
 ```
 
-`closure-ir` explores a different model:
+`closure-pack` explores a different model:
 
 ```text
 Rust closure
@@ -81,13 +81,13 @@ The current implementation explores whether Rust's compiler-visible syntax and p
 The project is split into two crates:
 
 ```text
-closure-ir/
+closure-pack/
 │
-├── closure-ir/
+├── closure-pack/
 │   └── src/
 │       └── lib.rs
 │
-├── closure-ir-macro/
+├── closure-pack-macro/
 │   └── src/
 │       └── lib.rs
 │
@@ -121,7 +121,7 @@ execute
 The following example demonstrates a JIT-compiled complex-number reciprocal. It exercises struct arguments, struct field access, arithmetic, conditionals, unary negation, and **struct construction inside the closure**.
 
 ```rust
-use closure_ir::{
+use closure_pack::{
     call,
     compile_closure,
     closure_ir,
@@ -270,7 +270,7 @@ For the complete runnable version, see `example/src/fft.rs`.
 
 Projects such as [Lamellar](https://github.com/pnnl/lamellar-runtime) provide remote execution through distributed active messages. An active-message type and its `exec()` implementation are compiled into the participating application; the runtime sends serialized state to the remote PE, which invokes the already-installed implementation.
 
-`closure-ir` explores a different layer of the problem: making the **closure representation itself portable**, so a remote execution environment could potentially receive the computation, compile/JIT it, and then execute it without having the original closure precompiled into the worker application.
+`closure-pack` explores a different layer of the problem: making the **closure representation itself portable**, so a remote execution environment could potentially receive the computation, compile/JIT it, and then execute it without having the original closure precompiled into the worker application.
 
 This is complementary to a distributed runtime rather than an attempt to replace one. A future system could potentially use a runtime such as Lamellar for communication and scheduling while using a portable closure representation for computation.
 

@@ -1,7 +1,7 @@
-use closure_ir::{
+use closure_pack::{
     call,
     compile_closure,
-    closure_ir,
+    closure_pack,
     CompileType,
 };
 
@@ -13,7 +13,7 @@ struct Complex {
 }
 
 fn print_ir() {
-    let expr = closure_ir!(|x: i32| -> bool {
+    let expr = closure_pack!(|x: i32| -> bool {
         true
     });
 

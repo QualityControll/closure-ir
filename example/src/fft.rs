@@ -1,4 +1,4 @@
-use closure_ir::{call, compile_closure, CompileType};
+use closure_pack::{call, compile_closure, CompileType};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, CompileType)]

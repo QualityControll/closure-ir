@@ -12,6 +12,6 @@ name = "reciprocal"
 path = "src/reciprocal.rs"
 
 [dependencies]
-closure-ir = {
-    path = "../closure-ir"
+closure-pack = {
+    path = "../closure-pack"
 }
