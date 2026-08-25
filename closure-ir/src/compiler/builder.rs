@@ -1,0 +1,368 @@
+use std::fmt::Write;
+
+use crate::{
+    expr::{Closure, Expr},
+    types::TypeInfo,
+};
+
+use super::{Ref, RefKind};
+
+pub(crate) struct MlirBuilder<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) closure: &'a Closure,
+    pub(crate) dynamic: bool,
+    pub(crate) text: String,
+    pub(crate) next_value: usize,
+    pub(crate) next_block: usize,
+    pub(crate) current_terminated: bool,
+    pub(crate) refs: Vec<Ref>,
+    pub(crate) args: Vec<Ref>,
+    pub(crate) local_count: usize,
+}
+
+impl<'a> MlirBuilder<'a> {
+    pub(crate) fn new(name: &'a str, closure: &'a Closure, dynamic: bool) -> Self {
+        Self {
+            name,
+            closure,
+            dynamic,
+            text: String::new(),
+            next_value: 0,
+            next_block: 0,
+            current_terminated: false,
+            refs: Vec::new(),
+            args: Vec::new(),
+            local_count: 0,
+        }
+    }
+
+    pub(crate) fn value(&mut self) -> String {
+        let s = format!("%v{}", self.next_value);
+        self.next_value += 1;
+        s
+    }
+
+    pub(crate) fn block(&mut self, prefix: &str) -> String {
+        let s = format!("{}_{}", prefix, self.next_block);
+        self.next_block += 1;
+        s
+    }
+
+    pub(crate) fn ty(t: &TypeInfo) -> String {
+        match t {
+            TypeInfo::F32 => "f32".into(),
+            TypeInfo::F64 => "f64".into(),
+            TypeInfo::I8 | TypeInfo::U8 => "i8".into(),
+            TypeInfo::I16 | TypeInfo::U16 => "i16".into(),
+            TypeInfo::I32 | TypeInfo::U32 => "i32".into(),
+            TypeInfo::I64 | TypeInfo::U64 | TypeInfo::Usize => "i64".into(),
+            TypeInfo::I128 | TypeInfo::U128 => "i128".into(),
+            TypeInfo::Bool => "i1".into(),
+            TypeInfo::Array { element, length } => {
+                format!("!llvm.array<{} x {}>", length, Self::ty(element))
+            }
+            TypeInfo::Slice { .. } => "!llvm.struct<(ptr, i64)>".into(),
+            TypeInfo::Struct { fields, .. } => format!(
+                "!llvm.struct<({})>",
+                fields
+                    .iter()
+                    .map(|f| Self::ty(&f.type_info))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }
+    }
+
+    pub(crate) fn one(&mut self) -> String {
+        let v = self.value();
+        self.text
+            .push_str(&format!("    {} = llvm.mlir.constant(1 : i64) : i64\n", v));
+        v
+    }
+
+    pub(crate) fn c_i64(&mut self, n: i64) -> String {
+        let v = self.value();
+        self.text.push_str(&format!(
+            "    {} = llvm.mlir.constant({} : i64) : i64\n",
+            v, n
+        ));
+        v
+    }
+
+    pub(crate) fn c_bool(&mut self, b: bool) -> String {
+        let v = self.value();
+        self.text.push_str(&format!(
+            "    {} = llvm.mlir.constant({} : i1) : i1\n",
+            v, b
+        ));
+        v
+    }
+
+    pub(crate) fn c_int(&mut self, n: &str, ty: &str) -> String {
+        let v = self.value();
+        self.text.push_str(&format!(
+            "    {} = llvm.mlir.constant({} : {}) : {}\n",
+            v, n, ty, ty
+        ));
+        v
+    }
+
+    pub(crate) fn c_float(&mut self, n: &str, ty: &str) -> String {
+        let v = self.value();
+        self.text.push_str(&format!(
+            "    {} = llvm.mlir.constant({} : {}) : {}\n",
+            v, n, ty, ty
+        ));
+        v
+    }
+
+    pub(crate) fn alloca(&mut self, t: &TypeInfo) -> String {
+        let n = self.one();
+        let v = self.value();
+        self.text.push_str(&format!(
+            "    {} = llvm.alloca {} x {} : (i64) -> !llvm.ptr\n",
+            v,
+            n,
+            Self::ty(t)
+        ));
+        v
+    }
+
+    pub(crate) fn load(&mut self, p: &str, t: &TypeInfo) -> String {
+        self.load_raw(p, &Self::ty(t))
+    }
+
+    pub(crate) fn load_raw(&mut self, p: &str, t: &str) -> String {
+        let v = self.value();
+        self.text
+            .push_str(&format!("    {} = llvm.load {} : !llvm.ptr -> {}\n", v, p, t));
+        v
+    }
+
+    pub(crate) fn store(&mut self, v: &str, p: &str, t: &TypeInfo) {
+        self.text.push_str(&format!(
+            "    llvm.store {}, {} : {}, !llvm.ptr\n",
+            v,
+            p,
+            Self::ty(t)
+        ));
+    }
+
+    pub(crate) fn gep_const(&mut self, p: &str, t: &TypeInfo, indices: &[usize]) -> String {
+        let v = self.value();
+        let idx = indices
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.text.push_str(&format!(
+            "    {} = llvm.getelementptr {}[{}] : (!llvm.ptr) -> !llvm.ptr, {}\n",
+            v,
+            p,
+            idx,
+            Self::ty(t)
+        ));
+        v
+    }
+
+    pub(crate) fn gep_dynamic(&mut self, p: &str, t: &TypeInfo, idx: &str) -> String {
+        self.gep_raw(p, &Self::ty(t), idx)
+    }
+
+    pub(crate) fn gep_raw(&mut self, p: &str, elem_ty: &str, idx: &str) -> String {
+        let v = self.value();
+        self.text.push_str(&format!(
+            "    {} = llvm.getelementptr {}[{}] : (!llvm.ptr, i64) -> !llvm.ptr, {}\n",
+            v, p, idx, elem_ty
+        ));
+        v
+    }
+
+    pub(crate) fn emit_branch(&mut self, target: &str) {
+        self.text.push_str(&format!("    llvm.br ^{}\n", target));
+        self.current_terminated = true;
+    }
+
+    pub(crate) fn emit_cond(&mut self, c: &str, t: &str, f: &str) {
+        self.text
+            .push_str(&format!("    llvm.cond_br {}, ^{}, ^{}\n", c, t, f));
+        self.current_terminated = true;
+    }
+
+    pub(crate) fn label(&mut self, label: &str) {
+        self.text.push_str(&format!("  ^{}:\n", label));
+        self.current_terminated = false;
+    }
+
+    pub(crate) fn bounds(&mut self, index: &str, len: &str) -> Result<(), String> {
+        let cmp = self.value();
+        self.text.push_str(&format!(
+            "    {} = llvm.icmp \"ult\", {}, {} : i64\n",
+            cmp, index, len
+        ));
+        let ok = self.block("bounds_ok");
+        let trap = self.block("bounds_trap");
+        self.emit_cond(&cmp, &ok, &trap);
+        self.label(&trap);
+        self.text
+            .push_str("    llvm.intr.trap\n    llvm.unreachable\n");
+        self.current_terminated = true;
+        self.label(&ok);
+        Ok(())
+    }
+
+    pub(crate) fn build(mut self) -> Result<String, String> {
+        let arg_struct = TypeInfo::Struct {
+            name: "args".into(),
+            fields: self
+                .closure
+                .arguments
+                .iter()
+                .enumerate()
+                .map(|(i, t)| crate::types::FieldInfo {
+                    name: i.to_string(),
+                    type_info: t.clone(),
+                })
+                .collect(),
+        };
+
+        writeln!(self.text, "module {{").unwrap();
+        writeln!(
+            self.text,
+            "  llvm.func @{}(%args: !llvm.ptr, %result: !llvm.ptr) {{",
+            self.name
+        )
+        .unwrap();
+        self.label("entry");
+
+        for (i, t) in self.closure.arguments.iter().enumerate() {
+            let v = if self.dynamic {
+                let idx = self.c_i64(i as i64);
+                let p = self.gep_raw("%args", "ptr", &idx);
+                let ap = self.load_raw(&p, "!llvm.ptr");
+                self.load(&ap, t)
+            } else {
+                let p = self.gep_const("%args", &arg_struct, &[0, i]);
+                self.load(&p, t)
+            };
+            let r = Ref {
+                name: v.clone(),
+                ty: t.clone(),
+                kind: RefKind::Value,
+            };
+            self.args.push(r.clone());
+            self.refs.push(r);
+        }
+
+        let result = self.lower_block(&self.closure.body, Some(&self.closure.return_type))?;
+        if let Some(r) = result {
+            self.store(&r.name, "%result", &r.ty);
+        }
+        if !self.current_terminated {
+            self.text.push_str("    llvm.return\n");
+        }
+        writeln!(self.text, "  }}\n}}").unwrap();
+        Ok(self.text)
+    }
+
+    pub(crate) fn address_of_expr(&mut self, e: &Expr) -> Result<Ref, String> {
+        match e {
+            Expr::Argument(i) => {
+                let t = self
+                    .closure
+                    .arguments
+                    .get(*i)
+                    .cloned()
+                    .ok_or("argument index out of bounds")?;
+                if self.dynamic {
+                    let idx = self.c_i64(*i as i64);
+                    let p = self.gep_raw("%args", "ptr", &idx);
+                    Ok(Ref {
+                        name: self.load_raw(&p, "!llvm.ptr"),
+                        ty: t,
+                        kind: RefKind::Address,
+                    })
+                } else {
+                    let at = TypeInfo::Struct {
+                        name: "args".into(),
+                        fields: self
+                            .closure
+                            .arguments
+                            .iter()
+                            .enumerate()
+                            .map(|(i, t)| crate::types::FieldInfo {
+                                name: i.to_string(),
+                                type_info: t.clone(),
+                            })
+                            .collect(),
+                    };
+                    Ok(Ref {
+                        name: self.gep_const("%args", &at, &[0, *i]),
+                        ty: t,
+                        kind: RefKind::Address,
+                    })
+                }
+            }
+            Expr::Field { object, name } => {
+                let base = self.address_of_expr(object)?;
+                let fields = match &base.ty {
+                    TypeInfo::Struct { fields, .. } => fields,
+                    _ => return Err("field access requires a struct".into()),
+                };
+                let (i, f) = fields
+                    .iter()
+                    .enumerate()
+                    .find(|(_, f)| f.name == *name)
+                    .ok_or_else(|| format!("field `{}` not found", name))?;
+                Ok(Ref {
+                    name: self.gep_const(&base.name, &base.ty, &[0, i]),
+                    ty: f.type_info.clone(),
+                    kind: RefKind::Address,
+                })
+            }
+            Expr::Index { sequence, index } => self.index_address(sequence, index),
+            _ => Err("expression is not addressable".into()),
+        }
+    }
+
+    pub(crate) fn lower_ref(&mut self, e: &Expr, expected: &TypeInfo) -> Result<Ref, String> {
+        if let Ok(a) = self.address_of_expr(e) {
+            let v = self.load(&a.name, &a.ty);
+            return Ok(Ref {
+                name: v,
+                ty: a.ty,
+                kind: RefKind::Value,
+            });
+        }
+        self.lower_expr(e, expected)
+    }
+
+    pub(crate) fn index_address(&mut self, sequence: &Expr, index: &Expr) -> Result<Ref, String> {
+        let base = self.address_of_expr(sequence)?;
+        let idx = self.lower_expr(index, &TypeInfo::Usize)?.name;
+        match &base.ty {
+            TypeInfo::Array { element, length } => {
+                let len = self.c_i64(*length as i64);
+                self.bounds(&idx, &len)?;
+                Ok(Ref {
+                    name: self.gep_dynamic(&base.name, &base.ty, &idx),
+                    ty: (**element).clone(),
+                    kind: RefKind::Address,
+                })
+            }
+            TypeInfo::Slice { element } => {
+                let data_p = self.gep_const(&base.name, &base.ty, &[0, 0]);
+                let len_p = self.gep_const(&base.name, &base.ty, &[0, 1]);
+                let data = self.load_raw(&data_p, "!llvm.ptr");
+                let len = self.load(&len_p, &TypeInfo::Usize);
+                self.bounds(&idx, &len)?;
+                Ok(Ref {
+                    name: self.gep_dynamic(&data, element, &idx),
+                    ty: (**element).clone(),
+                    kind: RefKind::Address,
+                })
+            }
+            _ => Err("indexing requires an indexable sequence".into()),
+        }
+    }
+}
