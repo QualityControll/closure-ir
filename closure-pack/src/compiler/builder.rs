@@ -29,6 +29,7 @@ impl<'a> MlirBuilder<'a>{
   let arg_struct=TypeInfo::Struct{name:"args".into(),fields:self.closure.arguments.iter().enumerate().map(|(i,t)|crate::types::FieldInfo{name:i.to_string(),type_info:t.clone()}).collect()};
   let cap_struct=TypeInfo::Struct{name:"captures".into(),fields:self.closure.captures.iter().enumerate().map(|(i,t)|crate::types::FieldInfo{name:i.to_string(),type_info:t.clone()}).collect()};
   writeln!(self.text,"module {{").unwrap();
+  for f in &self.closure.external_functions { let args=f.arguments.iter().map(Self::ty).collect::<Vec<_>>().join(", "); writeln!(self.text,"  llvm.func @{}({}) -> {}",f.name,args,Self::ty(&f.return_type)).unwrap(); }
   writeln!(self.text,"  llvm.func @{}(%captures: !llvm.ptr, %args: !llvm.ptr, %result: !llvm.ptr) attributes {{ llvm.emit_c_interface }} {{",self.name).unwrap();
   self.current_terminated=false;
   for(i,t)in self.closure.captures.iter().enumerate(){let p=self.gep_const("%captures",&cap_struct,&[0,i]);let v=self.load(&p,t);let r=Ref{name:v,ty:t.clone(),kind:RefKind::Value};self.refs.push(r);}

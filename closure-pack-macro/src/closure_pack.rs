@@ -32,6 +32,7 @@ fn expand_closure_pack(input: ClosureInput) -> syn::Result<proc_macro2::TokenStr
             arguments: vec![#(#argument_type_infos),*],
             return_type: <#return_type as ::closure_pack::CompileType>::type_info(),
             body: #block,
+            external_functions: Vec::new(),
         }
     })
 }
