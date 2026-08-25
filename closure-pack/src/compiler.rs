@@ -27,10 +27,20 @@ pub struct Compiler<'ctx> { pub(crate) context: &'ctx Context }
 impl<'ctx> Compiler<'ctx> {
     pub fn new(context: &'ctx Context) -> Self { Self { context } }
 
-    pub fn compile<Args, Ret>(&self, closure: &Closure) -> Result<CompiledClosure<'ctx, Args, Ret>, String>
-    where Args: CompileType, Ret: CompileType + 'static {
+    /// Compile a closure through the type-erased backend implementation.
+    ///
+    /// The expensive MLIR construction path is deliberately non-generic so
+    /// callers with many different argument/return types do not cause the
+    /// backend implementation to be monomorphized repeatedly.
+    pub fn compile_erased(&self, closure: &Closure) -> Result<(ExecutionEngine, String), String> {
         let (module, name) = self.build_module(closure, "compiled_closure", false)?;
         let engine = ExecutionEngine::new(&module, 0, &[], false, false);
+        Ok((engine, name))
+    }
+
+    pub fn compile<Args, Ret>(&self, closure: &Closure) -> Result<CompiledClosure<'ctx, Args, Ret>, String>
+    where Args: CompileType, Ret: CompileType + 'static {
+        let (engine, name) = self.compile_erased(closure)?;
         Ok(CompiledClosure::new(engine, name))
     }
 
