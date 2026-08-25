@@ -310,7 +310,3 @@ pub(crate) fn infer_types(
             infer_expr_block(body, &capture.name, arguments, &locals, Some(return_type));
     }
 }
-
-pub(crate) fn is_simple_capture_path(expr: &Expr) -> bool {
-    matches!(expr, Expr::Path(path) if path.path.segments.len() == 1)
-}

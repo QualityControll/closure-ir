@@ -2,39 +2,6 @@ use crate::expr::{Expr, Intrinsic};
 use crate::types::{FieldInfo, TypeInfo};
 use crate::value::Value;
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum BinaryOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Rem,
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-    And,
-    Or,
-    BitAnd,
-    BitOr,
-    BitXor,
-    Shl,
-    Shr,
-}
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum UnaryOp {
-    Not,
-    Neg,
-}
-
-pub(crate) fn expression_type(
-    argument_types: &[TypeInfo],
-    expr: &Expr,
-) -> Result<TypeInfo, String> {
-    expression_type_with_captures(&[], argument_types, expr)
-}
 
 pub(crate) fn expression_type_with_captures(
     capture_types: &[TypeInfo],
@@ -238,36 +205,3 @@ pub(crate) fn expression_type_with_captures(
     }
 }
 
-pub(crate) fn binary_operand_type(
-    argument_types: &[TypeInfo],
-    lhs: &Expr,
-    rhs: &Expr,
-    expected_type: &TypeInfo,
-    operation: &BinaryOp,
-) -> Result<TypeInfo, String> {
-    let lt = expression_type(argument_types, lhs)?;
-    let rt = expression_type(argument_types, rhs)?;
-    match operation {
-        BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
-            if lt != rt {
-                return Err("comparison operands must have the same type".into());
-            }
-            Ok(lt)
-        }
-        BinaryOp::And | BinaryOp::Or => {
-            if !lt.is_bool() || !rt.is_bool() {
-                return Err("logical &&/|| operands must be bool".into());
-            }
-            Ok(TypeInfo::Bool)
-        }
-        _ => {
-            if lt != rt {
-                return Err(format!(
-                    "binary operands must have the same type, got {:?} and {:?} (expected {:?})",
-                    lt, rt, expected_type
-                ));
-            }
-            Ok(lt)
-        }
-    }
-}
