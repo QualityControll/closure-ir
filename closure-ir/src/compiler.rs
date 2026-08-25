@@ -12,7 +12,7 @@ mod statements;
 
 pub(crate) use builder::MlirBuilder;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum RefKind { Value, Address }
 
 #[derive(Clone)]
