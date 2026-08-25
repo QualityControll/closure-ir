@@ -10,8 +10,8 @@ impl<'ctx,Args,Ret> CompiledClosure<'ctx,Args,Ret> where Args:CompileType,Ret:Co
   // invoke_packed expects a pointer to storage for each function argument.
   // The MLIR function takes two `ptr` arguments, so the storage for each
   // argument is itself a pointer-sized slot.
-  let args_ptr=value as *mut Args as *mut ();
-  let result_ptr=result.as_mut_ptr() as *mut ();
+  let mut args_ptr=value as *mut Args as *mut ();
+  let mut result_ptr=result.as_mut_ptr() as *mut ();
   let mut packed=[&mut (args_ptr) as *mut *mut () as *mut (),&mut (result_ptr) as *mut *mut () as *mut ()];
   self.engine.invoke_packed(&self.function_name,&mut packed).expect("failed to invoke compiled closure");result.assume_init()}
 }
