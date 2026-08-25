@@ -41,14 +41,24 @@ impl<'a> MlirBuilder<'a> {
                 self.label(&xb);
             }
             Statement::For { local, type_info, start, end, inclusive, body } => {
+                if *local != self.local_count {
+                    return Err(format!("invalid for-loop local index {}", local));
+                }
+
+                // Keep the loop induction variable in its own stack slot.  It is
+                // visible only while lowering the loop body, and is represented as
+                // an Address just like a `let` binding so assignments work naturally.
                 let p = self.alloca(type_info);
                 let s = self.lower_expr(start, type_info)?;
                 self.store(&s.name, &p, type_info);
+
                 let cb = self.block("for_cond");
                 let bb = self.block("for_body");
                 let ib = self.block("for_inc");
                 let xb = self.block("for_exit");
+
                 self.emit_branch(&cb);
+
                 self.label(&cb);
                 let cur = self.load(&p, type_info);
                 let ev = self.lower_expr(end, type_info)?;
@@ -68,18 +78,33 @@ impl<'a> MlirBuilder<'a> {
                     cmp, op, pred, cur, ev.name, Self::ty(type_info)
                 ));
                 self.emit_cond(&cmp, &bb, &xb);
+
                 self.label(&bb);
-                self.refs.push(Ref { name: p.clone(), ty: type_info.clone(), kind: RefKind::Address });
+                self.refs.push(Ref {
+                    name: p.clone(),
+                    ty: type_info.clone(),
+                    kind: RefKind::Address,
+                });
                 self.local_count += 1;
-                self.lower_block(body, None)?;
+                let body_result = self.lower_block(body, None);
                 self.local_count -= 1;
                 self.refs.pop();
+                body_result?;
+
+                // Only fall through to the increment block when the body did not
+                // already terminate.  This also leaves the increment block with a
+                // well-defined predecessor/terminator structure for MLIR parsing.
                 if !self.current_terminated {
                     self.emit_branch(&ib);
                 }
+
                 self.label(&ib);
                 let cur = self.load(&p, type_info);
-                let one = self.c_int("1", &Self::ty(type_info));
+                let one = if type_info.is_float() {
+                    self.c_float("1", &Self::ty(type_info))
+                } else {
+                    self.c_int("1", &Self::ty(type_info))
+                };
                 let n = self.value();
                 let op = if type_info.is_float() { "fadd" } else { "add" };
                 self.text.push_str(&format!(
@@ -88,6 +113,7 @@ impl<'a> MlirBuilder<'a> {
                 ));
                 self.store(&n, &p, type_info);
                 self.emit_branch(&cb);
+
                 self.label(&xb);
             }
         }
