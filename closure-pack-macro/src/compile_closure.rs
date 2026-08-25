@@ -19,8 +19,7 @@ fn expand_compile_closure(input: ClosureInput) -> syn::Result<proc_macro2::Token
     let tuple_type = if argument_types.is_empty() { quote! { () } } else { quote! { (#(#argument_types,)*) } };
     Ok(quote! {{
         let __closure = ::closure_pack::Closure { arguments: vec![#(#argument_type_infos),*], return_type: <#return_type as ::closure_pack::CompileType>::type_info(), body: #block };
-        let __context: &'static ::closure_pack::melior::Context = Box::leak(Box::new(::closure_pack::melior::Context::new()));
-        let __compiler = ::closure_pack::Compiler::new(__context);
+        let __compiler = ::closure_pack::Compiler::global();
         __compiler.compile::<#tuple_type, #return_type>(&__closure).expect("failed to compile closure")
     }})
 }

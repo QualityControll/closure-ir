@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use melior::{Context, ExecutionEngine};
 use melior::dialect::DialectRegistry;
 use melior::ir::Module;
@@ -22,10 +24,38 @@ pub(crate) struct Ref {
     pub(crate) kind: RefKind,
 }
 
+static GLOBAL_CONTEXT: OnceLock<Context> = OnceLock::new();
+
+fn initialize_context(context: &Context) {
+    let registry = DialectRegistry::new();
+    register_all_dialects(&registry);
+    context.append_dialect_registry(&registry);
+    context.load_all_available_dialects();
+    register_all_llvm_translations(context);
+}
+
 pub struct Compiler<'ctx> { pub(crate) context: &'ctx Context }
 
 impl<'ctx> Compiler<'ctx> {
-    pub fn new(context: &'ctx Context) -> Self { Self { context } }
+    pub fn new(context: &'ctx Context) -> Self {
+        initialize_context(context);
+        Self { context }
+    }
+
+    /// Returns a compiler backed by the process-wide MLIR context.
+    ///
+    /// The context is initialized lazily on the first call and then reused for
+    /// all subsequent compilations. Closure-pack currently assumes compilation
+    /// is single-threaded, so callers should not use this global compiler from
+    /// multiple threads concurrently.
+    pub fn global() -> Compiler<'static> {
+        let context = GLOBAL_CONTEXT.get_or_init(|| {
+            let context = Context::new();
+            initialize_context(&context);
+            context
+        });
+        Compiler { context }
+    }
 
     pub fn compile<Args, Ret>(&self, closure: &Closure) -> Result<CompiledClosure<'ctx, Args, Ret>, String>
     where Args: CompileType, Ret: CompileType + 'static {
@@ -41,11 +71,6 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     fn build_module(&self, closure: &Closure, name: &str, dynamic: bool) -> Result<(Module<'ctx>, String), String> {
-        let registry = DialectRegistry::new();
-        register_all_dialects(&registry);
-        self.context.append_dialect_registry(&registry);
-        self.context.load_all_available_dialects();
-        register_all_llvm_translations(self.context);
         let ir = MlirBuilder::new(name, closure, dynamic).build()?;
         let module = Module::parse(self.context, &ir).ok_or_else(|| format!("failed to parse generated MLIR:\n{}", ir))?;
         if !module.as_operation().verify() {
