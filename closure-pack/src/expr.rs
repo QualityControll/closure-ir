@@ -18,6 +18,6 @@ pub enum Expr {
 pub enum Statement { Let { local: usize, type_info: TypeInfo, value: Expr, mutable: bool }, Assign { local: usize, value: Expr }, AssignIndex { sequence: Expr, index: Expr, value: Expr }, While { condition: Expr, body: Block }, For { local: usize, type_info: TypeInfo, start: Expr, end: Expr, inclusive: bool, body: Block } }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Block { pub statements: Vec<Statement>, pub result: Option<Expr> }
-impl Block { pub fn expression(result: Expr) -> Self { Self { statements: Vec::new(), result: Some(result) } pub fn statements(statements: Vec<Statement>) -> Self { Self { statements, result: None } } }
+impl Block { pub fn expression(result: Expr) -> Self { Self { statements: Vec::new(), result: Some(result) } } pub fn statements(statements: Vec<Statement>) -> Self { Self { statements, result: None } } }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Closure { pub captures: Vec<TypeInfo>, pub arguments: Vec<TypeInfo>, pub return_type: TypeInfo, pub body: Block, pub external_functions: Vec<ExternalFunction> }
