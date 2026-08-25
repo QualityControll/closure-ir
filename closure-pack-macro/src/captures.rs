@@ -29,11 +29,11 @@ impl<'ast> Visit<'ast> for LocalCollector{fn visit_local(&mut self,node:&'ast sy
 fn infer_expr_block(block:&syn::Block,name:&Ident,arguments:&[ClosureArgument],locals:&[LocalVariable],expected:Option<&Type>)->Option<Type>{
  let mut current=locals.to_vec();
  for stmt in &block.stmts{match stmt{
-  syn::Stmt::Local(local)=>{let ty=match &local.pat{Pat::Type(p)=>Some((*p.ty).clone()),_=>local.init.as_ref().and_then(|i|infer_in_expr(&i.expr,name,arguments,&current,None))};if let Some(ident)=pat_ident(&local.pat){current.push(LocalVariable{name:ident.clone(),index:current.len(),type_info:ty,mutable:matches!(&local.pat,Pat::Ident(p) if p.mutability.is_some())});}if let Some(i)=&local.init{if let Some(t)=infer_in_expr(&i.expr,name,arguments,&current,None){return Some(t);}}}
+  syn::Stmt::Local(local)=>{let ty=match &local.pat{Pat::Type(p)=>Some((*p.ty).clone()),_=>local.init.as_ref().and_then(|i|infer_in_expr(&i.expr,name,arguments,&current,None))};if let Some(ident)=pat_ident(&local.pat){current.push(LocalVariable{name:ident.clone(),index:current.len(),type_info:ty,mutable:matches!(&local.pat,Pat::Ident(p) if p.mutability.is_some())});}}
   syn::Stmt::Expr(e,_)=>if let Some(t)=infer_in_expr(e,name,arguments,&current,expected){return Some(t)},
   _=>{}
  }}
- expected.cloned()
+ expected.filter(|_| false).cloned()
 }
 
 fn infer_in_expr(expr:&Expr,name:&Ident,arguments:&[ClosureArgument],locals:&[LocalVariable],expected:Option<&Type>)->Option<Type>{match expr{
