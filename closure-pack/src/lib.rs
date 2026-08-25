@@ -1,5 +1,6 @@
 mod compiler;
 mod expr;
+mod ffi;
 mod jit;
 mod operators;
 mod types;
@@ -7,6 +8,7 @@ mod value;
 
 pub use compiler::Compiler;
 pub use expr::{Block, Closure, Expr, Intrinsic, Statement};
+pub use ffi::ExternalFunction;
 pub use jit::CompiledClosure;
 pub use types::{CompileType, FieldInfo, TypeInfo};
 pub use value::Value;
