@@ -1,9 +1,8 @@
 use std::fmt::Write;
-
 use crate::{expr::Closure, types::TypeInfo};
 use super::{Ref, RefKind};
 
-pub(crate) struct MlirBuilder<'a> { pub(crate) name:&'a str,pub(crate) closure:&'a Closure,pub(crate) dynamic:bool,pub(crate) text:String,pub(crate) next_value:usize,pub(crate) next_block:usize,pub(crate) current_terminated:bool,pub(crate) refs:Vec<Ref>,pub(crate) args:Vec<Ref>,pub(crate) local_count:usize }
+pub(crate) struct MlirBuilder<'a>{pub(crate) name:&'a str,pub(crate) closure:&'a Closure,pub(crate) dynamic:bool,pub(crate) text:String,pub(crate) next_value:usize,pub(crate) next_block:usize,pub(crate) current_terminated:bool,pub(crate) refs:Vec<Ref>,pub(crate) args:Vec<Ref>,pub(crate) local_count:usize}
 impl<'a> MlirBuilder<'a>{
  pub(crate) fn new(name:&'a str,closure:&'a Closure,dynamic:bool)->Self{Self{name,closure,dynamic,text:String::new(),next_value:0,next_block:0,current_terminated:false,refs:Vec::new(),args:Vec::new(),local_count:0}}
  pub(crate) fn value(&mut self)->String{let s=format!("%v{}",self.next_value);self.next_value+=1;s}
@@ -26,5 +25,17 @@ impl<'a> MlirBuilder<'a>{
  pub(crate) fn emit_cond(&mut self,c:&str,t:&str,f:&str){self.text.push_str(&format!("    llvm.cond_br {}, ^{}, ^{}\n",c,t,f));self.current_terminated=true}
  pub(crate) fn label(&mut self,label:&str){self.text.push_str(&format!("  ^{}:\n",label));self.current_terminated=false}
  pub(crate) fn bounds(&mut self,index:&str,len:&str)->Result<(),String>{let cmp=self.value();self.text.push_str(&format!("    {} = llvm.icmp \"ult\" {}, {} : i64\n",cmp,index,len));let ok=self.block("bounds_ok");let trap=self.block("bounds_trap");self.emit_cond(&cmp,&ok,&trap);self.label(&trap);self.text.push_str("    llvm.intr.trap\n    llvm.unreachable\n");self.current_terminated=true;self.label(&ok);Ok(())}
- pub(crate) fn build(mut self)->Result<String,String>{let arg_struct=TypeInfo::Struct{name:"args".into(),fields:self.closure.arguments.iter().enumerate().map(|(i,t)|crate::types::FieldInfo{name:i.to_string(),type_info:t.clone()}).collect()};writeln!(self.text,"module {{").unwrap();writeln!(self.text,"  llvm.func @{}(%args: !llvm.ptr, %result: !llvm.ptr) attributes {{ llvm.emit_c_interface }} {{",self.name).unwrap();self.current_terminated=false;for(i,t)in self.closure.arguments.iter().enumerate(){let v=if self.dynamic{let idx=self.c_i64(i as i64);let p=self.gep_raw("%args","!llvm.ptr",&idx);let ap=self.load_raw(&p,"!llvm.ptr");self.load(&ap,t)}else{let p=self.gep_const("%args",&arg_struct,&[0,i]);self.load(&p,t)};let r=Ref{name:v,ty:t.clone(),kind:RefKind::Value};self.args.push(r.clone());self.refs.push(r)}let result=self.lower_block(&self.closure.body,Some(&self.closure.return_type))?;if let Some(r)=result{self.store(&r.name,"%result",&r.ty)}if !self.current_terminated{self.text.push_str("    llvm.return\n")}writeln!(self.text,"  }}").unwrap();writeln!(self.text,"  llvm.func @_mlir_ciface_{}(%args: !llvm.ptr, %result: !llvm.ptr) {{",self.name).unwrap();writeln!(self.text,"    llvm.call @{}(%args, %result) : (!llvm.ptr, !llvm.ptr) -> ()",self.name).unwrap();writeln!(self.text,"    llvm.return\n  }}\n}}\n").unwrap();Ok(self.text)}
+ pub(crate) fn build(mut self)->Result<String,String>{
+  let arg_struct=TypeInfo::Struct{name:"args".into(),fields:self.closure.arguments.iter().enumerate().map(|(i,t)|crate::types::FieldInfo{name:i.to_string(),type_info:t.clone()}).collect()};
+  let cap_struct=TypeInfo::Struct{name:"captures".into(),fields:self.closure.captures.iter().enumerate().map(|(i,t)|crate::types::FieldInfo{name:i.to_string(),type_info:t.clone()}).collect()};
+  writeln!(self.text,"module {{").unwrap();
+  writeln!(self.text,"  llvm.func @{}(%captures: !llvm.ptr, %args: !llvm.ptr, %result: !llvm.ptr) attributes {{ llvm.emit_c_interface }} {{",self.name).unwrap();
+  self.current_terminated=false;
+  for(i,t)in self.closure.captures.iter().enumerate(){let p=self.gep_const("%captures",&cap_struct,&[0,i]);let v=self.load(&p,t);let r=Ref{name:v,ty:t.clone(),kind:RefKind::Value};self.refs.push(r);}
+  for(i,t)in self.closure.arguments.iter().enumerate(){let v=if self.dynamic{let idx=self.c_i64(i as i64);let p=self.gep_raw("%args","!llvm.ptr",&idx);let ap=self.load_raw(&p,"!llvm.ptr");self.load(&ap,t)}else{let p=self.gep_const("%args",&arg_struct,&[0,i]);self.load(&p,t)};let r=Ref{name:v,ty:t.clone(),kind:RefKind::Value};self.args.push(r.clone());self.refs.push(r)}
+  let result=self.lower_block(&self.closure.body,Some(&self.closure.return_type))?;if let Some(r)=result{self.store(&r.name,"%result",&r.ty)}if !self.current_terminated{self.text.push_str("    llvm.return\n")}
+  writeln!(self.text,"  }}").unwrap();
+  writeln!(self.text,"  llvm.func @_mlir_ciface_{}(%captures: !llvm.ptr, %args: !llvm.ptr, %result: !llvm.ptr) {{",self.name).unwrap();
+  writeln!(self.text,"    llvm.call @{}(%captures, %args, %result) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> ()",self.name).unwrap();writeln!(self.text,"    llvm.return\n  }}\n}}\n").unwrap();Ok(self.text)
+ }
 }
