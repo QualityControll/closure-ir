@@ -7,10 +7,9 @@ pub struct Complex {
     pub im: f64,
 }
 
-pub fn fft(values: &mut [Complex]) {
-    let pi = std::f64::consts::PI;
+pub fn fft(values: &mut [Complex], pi: f64) {
     let compiled = compile_closure!(
-        |values: &mut [Complex]| -> usize {
+        |values: &mut [Complex], pi: f64| -> usize {
             let n = values.len();
 
             let mut j: usize = 0;
@@ -70,7 +69,7 @@ pub fn fft(values: &mut [Complex]) {
         }
     );
 
-    call!(compiled, values);
+    call!(compiled, values, pi);
 }
 
 fn main() {
@@ -86,6 +85,6 @@ fn main() {
     ];
 
     println!("Input: {:?}", values);
-    fft(&mut values);
+    fft(&mut values, std::f64::consts::PI);
     println!("8-point FFT: {:?}", values);
 }
