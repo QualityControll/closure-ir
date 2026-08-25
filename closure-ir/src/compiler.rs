@@ -2,6 +2,7 @@ use std::fmt::Write;
 use melior::{Context, ExecutionEngine};
 use melior::dialect::DialectRegistry;
 use melior::ir::Module;
+use melior::ir::operation::OperationLike;
 use melior::utility::{register_all_dialects, register_all_llvm_translations};
 use crate::{expr::{Block, Closure, Expr, Intrinsic, Statement}, jit::{CompiledClosure, DynamicCompiledClosure}, operators::expression_type, types::{CompileType, TypeInfo}, value::Value};
 
