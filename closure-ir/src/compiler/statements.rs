@@ -115,6 +115,8 @@ impl<'a> MlirBuilder<'a> {
                 e,
                 expected.ok_or("block result has no expected type")?,
             )?))
+        } else if matches!(expected, Some(TypeInfo::Struct { name, fields }) if name == "()" && fields.is_empty()) {
+            Ok(None)
         } else if expected.is_some() {
             Err("block has no result expression".into())
         } else {
