@@ -8,7 +8,15 @@ pub struct ExternalFunction {
 }
 
 impl ExternalFunction {
-    pub fn new<N: Into<String>>(name: N, arguments: Vec<crate::types::TypeInfo>, return_type: crate::types::TypeInfo) -> Self {
-        Self { name: name.into(), arguments, return_type }
+    pub fn new<N: Into<String>>(
+        name: N,
+        arguments: Vec<crate::types::TypeInfo>,
+        return_type: crate::types::TypeInfo,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            arguments,
+            return_type,
+        }
     }
 }

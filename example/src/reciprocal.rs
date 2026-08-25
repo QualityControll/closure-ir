@@ -1,9 +1,4 @@
-use closure_pack::{
-    call,
-    compile_closure,
-    closure_pack,
-    CompileType,
-};
+use closure_pack::{call, closure_pack, compile_closure, CompileType};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, CompileType)]
@@ -13,9 +8,7 @@ struct Complex {
 }
 
 fn print_ir() {
-    let expr = closure_pack!(|x: i32| -> bool {
-        true
-    });
+    let expr = closure_pack!(|x: i32| -> bool { true });
 
     println!("IR expression: {:?}", expr);
 }
@@ -29,30 +22,25 @@ fn main() {
 
     println!("Input: {:?}", values);
 
-    let compiled = compile_closure!(
-        |values: &mut [Complex]| -> usize {
-            for i in 0..values.len() {
-                let z: Complex = values[i];
-                let denominator: f64 = z.re * z.re + z.im * z.im;
+    let compiled = compile_closure!(|values: &mut [Complex]| -> usize {
+        for i in 0..values.len() {
+            let z: Complex = values[i];
+            let denominator: f64 = z.re * z.re + z.im * z.im;
 
-                let result: Complex = if denominator == 0.0 {
-                    Complex {
-                        re: 0.0,
-                        im: 0.0,
-                    }
-                } else {
-                    Complex {
-                        re: z.re / denominator,
-                        im: -z.im / denominator,
-                    }
-                };
+            let result: Complex = if denominator == 0.0 {
+                Complex { re: 0.0, im: 0.0 }
+            } else {
+                Complex {
+                    re: z.re / denominator,
+                    im: -z.im / denominator,
+                }
+            };
 
-                values[i] = result;
-            }
-
-            values.len()
+            values[i] = result;
         }
-    );
+
+        values.len()
+    });
 
     let processed = call!(compiled, &mut values[..]);
     assert_eq!(processed, values.len());

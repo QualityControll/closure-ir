@@ -33,7 +33,9 @@ pub(crate) fn lower_literal(
                         lower_integer_with_type(value, ty)
                     } else {
                         let parsed = value.base10_parse::<i32>()?;
-                        Ok(quote!(::closure_pack::Expr::Constant(::closure_pack::Value::I32(#parsed))))
+                        Ok(
+                            quote!(::closure_pack::Expr::Constant(::closure_pack::Value::I32(#parsed))),
+                        )
                     }
                 }
                 "i8" => int!(value, i8, I8),
@@ -47,7 +49,10 @@ pub(crate) fn lower_literal(
                 "u64" => int!(value, u64, U64),
                 "u128" => int!(value, u128, U128),
                 "usize" => int!(value, usize, Usize),
-                _ => Err(syn::Error::new_spanned(value, "unsupported integer literal")),
+                _ => Err(syn::Error::new_spanned(
+                    value,
+                    "unsupported integer literal",
+                )),
             }
         }
         Lit::Float(value) => {
@@ -58,12 +63,17 @@ pub(crate) fn lower_literal(
                         lower_float_with_type(value, ty)
                     } else {
                         let parsed = value.base10_parse::<f64>()?;
-                        Ok(quote!(::closure_pack::Expr::Constant(::closure_pack::Value::F64(#parsed))))
+                        Ok(
+                            quote!(::closure_pack::Expr::Constant(::closure_pack::Value::F64(#parsed))),
+                        )
                     }
                 }
                 "f32" => float!(value, f32, F32),
                 "f64" => float!(value, f64, F64),
-                _ => Err(syn::Error::new_spanned(value, "unsupported floating-point literal")),
+                _ => Err(syn::Error::new_spanned(
+                    value,
+                    "unsupported floating-point literal",
+                )),
             }
         }
         _ => Err(syn::Error::new_spanned(literal, "unsupported literal")),

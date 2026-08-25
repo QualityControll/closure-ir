@@ -14,30 +14,47 @@ fn expand_derive_closure_type(input: DeriveInput) -> syn::Result<proc_macro2::To
     let name = input.ident;
     let fields = match input.data {
         Data::Struct(DataStruct { fields, .. }) => fields,
-        _ => return Err(syn::Error::new_spanned(name, "CompileType can only be derived for structs")),
+        _ => {
+            return Err(syn::Error::new_spanned(
+                name,
+                "CompileType can only be derived for structs",
+            ))
+        }
     };
 
     let field_infos = match &fields {
-        Fields::Named(fields) => fields.named.iter().map(|field| {
-            let field_name = field.ident.as_ref().ok_or_else(|| syn::Error::new_spanned(field, "expected named field"))?;
-            let ty = &field.ty;
-            Ok(quote! {
-                ::closure_pack::FieldInfo {
-                    name: stringify!(#field_name).to_string(),
-                    type_info: <#ty as ::closure_pack::CompileType>::type_info(),
-                }
+        Fields::Named(fields) => fields
+            .named
+            .iter()
+            .map(|field| {
+                let field_name = field
+                    .ident
+                    .as_ref()
+                    .ok_or_else(|| syn::Error::new_spanned(field, "expected named field"))?;
+                let ty = &field.ty;
+                Ok(quote! {
+                    ::closure_pack::FieldInfo {
+                        name: stringify!(#field_name).to_string(),
+                        type_info: <#ty as ::closure_pack::CompileType>::type_info(),
+                    }
+                })
             })
-        }).collect::<syn::Result<Vec<_>>>()?,
-        Fields::Unnamed(fields) => fields.unnamed.iter().enumerate().map(|(index, field)| {
-            let ty = &field.ty;
-            let index_string = index.to_string();
-            Ok(quote! {
-                ::closure_pack::FieldInfo {
-                    name: #index_string.to_string(),
-                    type_info: <#ty as ::closure_pack::CompileType>::type_info(),
-                }
+            .collect::<syn::Result<Vec<_>>>()?,
+        Fields::Unnamed(fields) => fields
+            .unnamed
+            .iter()
+            .enumerate()
+            .map(|(index, field)| {
+                let ty = &field.ty;
+                let index_string = index.to_string();
+                Ok(quote! {
+                    ::closure_pack::FieldInfo {
+                        name: #index_string.to_string(),
+                        type_info: <#ty as ::closure_pack::CompileType>::type_info(),
+                    }
+                })
             })
-        }).collect::<syn::Result<Vec<_>>>()?,
+            .collect::<syn::Result<Vec<_>>>()?,
         Fields::Unit => Vec::new(),
     };
 

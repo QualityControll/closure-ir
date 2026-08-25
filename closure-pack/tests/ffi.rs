@@ -11,7 +11,11 @@ fn external_function_call_compiles() {
             arguments: vec![Expr::Argument(0)],
             return_type: TypeInfo::F64,
         }),
-        external_functions: vec![ExternalFunction::new("sqrt", vec![TypeInfo::F64], TypeInfo::F64)],
+        external_functions: vec![ExternalFunction::new(
+            "sqrt",
+            vec![TypeInfo::F64],
+            TypeInfo::F64,
+        )],
     };
     let context = Box::leak(Box::new(closure_pack::melior::Context::new()));
     let compiler = Compiler::new(context);
