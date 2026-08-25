@@ -27,16 +27,20 @@ impl<'a> MlirBuilder<'a> {
                 let cb = self.block("while_cond"); let bb = self.block("while_body"); let xb = self.block("while_exit");
                 self.emit_branch(&cb); self.label(&cb);
                 let c = self.lower_expr(condition, &TypeInfo::Bool)?; self.emit_cond(&c.name, &bb, &xb); self.label(&bb);
-                let saved_local_count = self.local_count; let saved_ref_count = self.refs.len();
+                let saved_local_count = self.local_count;
+                let saved_ref_count = self.refs.len();
                 let body_result = self.lower_block(body, None);
-                self.local_count = saved_local_count; self.refs.truncate(saved_ref_count);
+                self.local_count = saved_local_count;
+                self.refs.truncate(saved_ref_count);
                 body_result?;
                 if !self.current_terminated { self.emit_branch(&cb); }
                 self.label(&xb);
             }
             Statement::For { local, type_info, start, end, inclusive, body } => {
                 if *local != self.local_count { return Err(format!("invalid for-loop local index {}", local)); }
-                let p = self.alloca(type_info); let s = self.lower_expr(start, type_info)?; self.store(&s.name, &p, type_info);
+                let p = self.alloca(type_info);
+                let s = self.lower_expr(start, type_info)?;
+                self.store(&s.name, &p, type_info);
                 let cb = self.block("for_cond"); let bb = self.block("for_body"); let ib = self.block("for_inc"); let xb = self.block("for_exit");
                 self.emit_branch(&cb); self.label(&cb);
                 let cur = self.load(&p, type_info); let ev = self.lower_expr(end, type_info)?; let cmp = self.value();
@@ -44,10 +48,14 @@ impl<'a> MlirBuilder<'a> {
                 let op = if type_info.is_float() { "fcmp" } else { "icmp" };
                 self.text.push_str(&format!("    {} = llvm.{} \"{}\" {}, {} : {}\n", cmp, op, pred, cur, ev.name, Self::ty(type_info)));
                 self.emit_cond(&cmp, &bb, &xb); self.label(&bb);
-                let saved_local_count = self.local_count; let saved_ref_count = self.refs.len();
-                self.refs.push(Ref { name: p.clone(), ty: type_info.clone(), kind: RefKind::Address }); self.local_count += 1;
+                let saved_local_count = self.local_count;
+                let saved_ref_count = self.refs.len();
+                self.refs.push(Ref { name: p.clone(), ty: type_info.clone(), kind: RefKind::Address });
+                self.local_count += 1;
                 let body_result = self.lower_block(body, None);
-                self.local_count = saved_local_count; self.refs.truncate(saved_ref_count); body_result?;
+                self.local_count = saved_local_count;
+                self.refs.truncate(saved_ref_count);
+                body_result?;
                 if !self.current_terminated { self.emit_branch(&ib); }
                 self.label(&ib);
                 let cur = self.load(&p, type_info); let one = if type_info.is_float() { self.c_float("1", &Self::ty(type_info)) } else { self.c_int("1", &Self::ty(type_info)) };
