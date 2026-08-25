@@ -7,21 +7,29 @@ use crate::lowering::expression::{expression_type, LocalVariable};
 #[derive(Clone)]
 pub(crate) struct Capture { pub(crate) name: Ident, pub(crate) type_info: Option<Type> }
 
+fn pat_ident(pat: &Pat) -> Option<&Ident> {
+    match pat {
+        Pat::Ident(p) => Some(&p.ident),
+        Pat::Type(p) => pat_ident(&p.pat),
+        _ => None,
+    }
+}
+
 struct CaptureVisitor { bound:BTreeSet<String>, names:BTreeSet<String> }
 impl CaptureVisitor { fn new(arguments:&[ClosureArgument])->Self{let mut bound=BTreeSet::new();for a in arguments{bound.insert(a.name.to_string());}Self{bound,names:BTreeSet::new()}} }
 impl<'ast> Visit<'ast> for CaptureVisitor {
  fn visit_expr_path(&mut self,node:&'ast syn::ExprPath){if node.path.segments.len()==1{let name=node.path.segments[0].ident.to_string();if !self.bound.contains(&name)&&name!="self"{self.names.insert(name);}}visit::visit_expr_path(self,node)}
  fn visit_expr_call(&mut self,node:&'ast ExprCall){for arg in &node.args{self.visit_expr(arg);}}
- fn visit_local(&mut self,node:&'ast syn::Local){if let Some(init)=&node.init{self.visit_expr(&init.expr);}if let Pat::Ident(p)=&node.pat{self.bound.insert(p.ident.to_string());}}
- fn visit_expr_for_loop(&mut self,node:&'ast syn::ExprForLoop){self.visit_expr(&node.expr);if let Pat::Ident(p)=&*node.pat{self.bound.insert(p.ident.to_string());}self.visit_block(&node.body);}
+ fn visit_local(&mut self,node:&'ast syn::Local){if let Some(init)=&node.init{self.visit_expr(&init.expr);}if let Some(ident)=pat_ident(&node.pat){self.bound.insert(ident.to_string());}}
+ fn visit_expr_for_loop(&mut self,node:&'ast syn::ExprForLoop){self.visit_expr(&node.expr);if let Some(ident)=pat_ident(&node.pat){self.bound.insert(ident.to_string());}self.visit_block(&node.body);}
 }
 struct LocalCollector{names:BTreeSet<String>}
-impl<'ast> Visit<'ast> for LocalCollector{fn visit_local(&mut self,node:&'ast syn::Local){if let Pat::Ident(p)=&node.pat{self.names.insert(p.ident.to_string());}visit::visit_local(self,node)}fn visit_expr_for_loop(&mut self,node:&'ast syn::ExprForLoop){if let Pat::Ident(p)=&*node.pat{self.names.insert(p.ident.to_string());}visit::visit_expr_for_loop(self,node)}}
+impl<'ast> Visit<'ast> for LocalCollector{fn visit_local(&mut self,node:&'ast syn::Local){if let Some(ident)=pat_ident(&node.pat){self.names.insert(ident.to_string());}visit::visit_local(self,node)}fn visit_expr_for_loop(&mut self,node:&'ast syn::ExprForLoop){if let Some(ident)=pat_ident(&node.pat){self.names.insert(ident.to_string());}visit::visit_expr_for_loop(self,node)}}
 
 fn infer_expr_block(block:&syn::Block,name:&Ident,arguments:&[ClosureArgument],locals:&[LocalVariable],expected:Option<&Type>)->Option<Type>{
  let mut current=locals.to_vec();
  for stmt in &block.stmts{match stmt{
-  syn::Stmt::Local(local)=>{let ty=match &local.pat{Pat::Type(p)=>Some((*p.ty).clone()),_=>local.init.as_ref().and_then(|i|infer_in_expr(&i.expr,name,arguments,&current,None))};if let Pat::Ident(p)=&local.pat{current.push(LocalVariable{name:p.ident.clone(),index:current.len(),type_info:ty,mutable:p.mutability.is_some()});}if let Some(i)=&local.init{if let Some(t)=infer_in_expr(&i.expr,name,arguments,&current,None){return Some(t);}}}
+  syn::Stmt::Local(local)=>{let ty=match &local.pat{Pat::Type(p)=>Some((*p.ty).clone()),_=>local.init.as_ref().and_then(|i|infer_in_expr(&i.expr,name,arguments,&current,None))};if let Some(ident)=pat_ident(&local.pat){current.push(LocalVariable{name:ident.clone(),index:current.len(),type_info:ty,mutable:matches!(&local.pat,Pat::Ident(p) if p.mutability.is_some())});}if let Some(i)=&local.init{if let Some(t)=infer_in_expr(&i.expr,name,arguments,&current,None){return Some(t);}}}
   syn::Stmt::Expr(e,_)=>if let Some(t)=infer_in_expr(e,name,arguments,&current,expected){return Some(t)},
   _=>{}
  }}
