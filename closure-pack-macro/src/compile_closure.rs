@@ -10,7 +10,10 @@ fn expand_compile_closure(input:ClosureInput)->syn::Result<proc_macro2::TokenStr
  let ClosureInput{arguments,return_type,body}=input;
  let captures=captures::discover(&body.block,&arguments);
  let mut lowering_arguments=arguments.clone();
- for capture in &captures { lowering_arguments.push(ClosureArgument{name:capture.name.clone(),type_info:capture.type_info.clone(),capture:true}); }
+ for capture in &captures {
+  let type_info=capture.type_info.clone().ok_or_else(||syn::Error::new(capture.name.span(),format!("cannot infer type of capture `{}`",capture.name)))?;
+  lowering_arguments.push(ClosureArgument{name:capture.name.clone(),type_info,capture:true});
+ }
  let locals=Vec::new();
  let is_unit=matches!(&return_type,syn::Type::Tuple(tuple) if tuple.elems.is_empty());
  let block=if is_unit{lower_block(&body.block,&lowering_arguments,&locals,None)?}else{lower_block(&body.block,&lowering_arguments,&locals,Some(&return_type))?};
@@ -19,7 +22,10 @@ fn expand_compile_closure(input:ClosureInput)->syn::Result<proc_macro2::TokenStr
  let tuple_type=if argument_types.is_empty(){quote!{()}}else{quote!{(#(#argument_types,)*)}};
  let capture_names=captures.iter().map(|capture|&capture.name).collect::<Vec<_>>();
  let capture_values=if capture_names.is_empty(){quote!{()}}else{quote!{(#(#capture_names,)*)}};
- let capture_type_infos=capture_names.iter().map(|name|quote!{::closure_pack::type_info_of(|| #name)}).collect::<Vec<_>>();
+ let capture_type_infos=captures.iter().map(|capture|{
+  let ty=capture.type_info.as_ref().ok_or_else(||syn::Error::new(capture.name.span(),format!("cannot infer type of capture `{}`",capture.name)))?;
+  Ok(quote!{<#ty as ::closure_pack::CompileType>::type_info()})
+ }).collect::<syn::Result<Vec<_>>>()?;
  Ok(quote!{{
    let __captures= #capture_values;
    let __closure=::closure_pack::Closure{captures:vec![#(#capture_type_infos),*],arguments:vec![#(#argument_type_infos),*],return_type:<#return_type as ::closure_pack::CompileType>::type_info(),body:#block};
