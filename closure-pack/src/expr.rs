@@ -7,7 +7,9 @@ pub enum Intrinsic { Sqrt, Abs, Min, Max, Floor, Ceil, Round, Sin, Cos, Tan, Exp
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Expr {
-    Argument(usize), Constant(Value),
+    Argument(usize),
+    Capture(usize),
+    Constant(Value),
     Cast { expr: Box<Expr>, source_type: TypeInfo, target_type: TypeInfo },
     Index { sequence: Box<Expr>, index: Box<Expr> },
     Len { sequence: Box<Expr> },
@@ -26,4 +28,4 @@ pub enum Statement { Let { local: usize, type_info: TypeInfo, value: Expr, mutab
 pub struct Block { pub statements: Vec<Statement>, pub result: Option<Expr> }
 impl Block { pub fn expression(result: Expr) -> Self { Self { statements: Vec::new(), result: Some(result) } } pub fn statements(statements: Vec<Statement>) -> Self { Self { statements, result: None } } }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Closure { pub arguments: Vec<TypeInfo>, pub return_type: TypeInfo, pub body: Block }
+pub struct Closure { pub captures: Vec<TypeInfo>, pub arguments: Vec<TypeInfo>, pub return_type: TypeInfo, pub body: Block }
