@@ -1,23 +1,251 @@
+use crate::{
+    types::{CompileType, TypeInfo},
+    value::Value,
+};
+use melior::ExecutionEngine;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
-use melior::ExecutionEngine;
-use crate::{types::{CompileType, TypeInfo}, value::Value};
 
-pub struct CompiledClosure<'ctx,Args,Ret,Captures=()>{pub(crate) engine:ExecutionEngine,pub(crate) function_name:String,pub(crate) captures:Captures,pub(crate) _marker:PhantomData<fn(Args)->Ret>,pub(crate) _context:PhantomData<&'ctx ()>}
-impl<'ctx,Args,Ret,Captures> CompiledClosure<'ctx,Args,Ret,Captures> where Args:CompileType,Captures:CompileType,Ret:CompileType+'static{
- pub(crate) fn new(engine:ExecutionEngine,function_name:String)->Self where Captures:Default{Self{engine,function_name,captures:Captures::default(),_marker:PhantomData,_context:PhantomData}}
- pub(crate) fn new_captured(engine:ExecutionEngine,function_name:String,captures:Captures)->Self{Self{engine,function_name,captures,_marker:PhantomData,_context:PhantomData}}
- pub unsafe fn call(&self,value:&mut Args)->Ret{let mut result=MaybeUninit::<Ret>::uninit();let mut captures_ptr=&self.captures as *const Captures as *mut ();let mut args_ptr=value as *mut Args as *mut ();let mut result_ptr=result.as_mut_ptr() as *mut ();let mut packed=[&mut captures_ptr as *mut *mut () as *mut (),&mut args_ptr as *mut *mut () as *mut (),&mut result_ptr as *mut *mut () as *mut ()];let packed_name=format!("_mlir_{}",self.function_name);if self.engine.lookup(&packed_name).is_null(){panic!("failed to invoke compiled closure: packed entry point `{}` was not found",packed_name)}self.engine.invoke_packed(&self.function_name,&mut packed).expect("failed to invoke compiled closure");result.assume_init()}
+pub struct CompiledClosure<'ctx, Args, Ret, Captures = ()> {
+    pub(crate) engine: ExecutionEngine,
+    pub(crate) function_name: String,
+    pub(crate) captures: Captures,
+    pub(crate) _marker: PhantomData<fn(Args) -> Ret>,
+    pub(crate) _context: PhantomData<&'ctx ()>,
+}
+impl<'ctx, Args, Ret, Captures> CompiledClosure<'ctx, Args, Ret, Captures>
+where
+    Args: CompileType,
+    Captures: CompileType,
+    Ret: CompileType + 'static,
+{
+    pub(crate) fn new(engine: ExecutionEngine, function_name: String) -> Self
+    where
+        Captures: Default,
+    {
+        Self {
+            engine,
+            function_name,
+            captures: Captures::default(),
+            _marker: PhantomData,
+            _context: PhantomData,
+        }
+    }
+    pub(crate) fn new_captured(
+        engine: ExecutionEngine,
+        function_name: String,
+        captures: Captures,
+    ) -> Self {
+        Self {
+            engine,
+            function_name,
+            captures,
+            _marker: PhantomData,
+            _context: PhantomData,
+        }
+    }
+    pub unsafe fn call(&self, value: &mut Args) -> Ret {
+        let mut result = MaybeUninit::<Ret>::uninit();
+        let mut captures_ptr = &self.captures as *const Captures as *mut ();
+        let mut args_ptr = value as *mut Args as *mut ();
+        let mut result_ptr = result.as_mut_ptr() as *mut ();
+        let mut packed = [
+            &mut captures_ptr as *mut *mut () as *mut (),
+            &mut args_ptr as *mut *mut () as *mut (),
+            &mut result_ptr as *mut *mut () as *mut (),
+        ];
+        let packed_name = format!("_mlir_{}", self.function_name);
+        if self.engine.lookup(&packed_name).is_null() {
+            panic!(
+                "failed to invoke compiled closure: packed entry point `{}` was not found",
+                packed_name
+            )
+        }
+        self.engine
+            .invoke_packed(&self.function_name, &mut packed)
+            .expect("failed to invoke compiled closure");
+        result.assume_init()
+    }
 }
 
-pub struct DynamicCompiledClosure<'ctx>{pub(crate) engine:ExecutionEngine,pub(crate) function_name:String,pub(crate) arguments:Vec<TypeInfo>,pub(crate) return_type:TypeInfo,pub(crate) _context:PhantomData<&'ctx ()>}
-impl<'ctx> DynamicCompiledClosure<'ctx>{pub(crate) fn new(engine:ExecutionEngine,function_name:String,arguments:Vec<TypeInfo>,return_type:TypeInfo)->Self{Self{engine,function_name,arguments,return_type,_context:PhantomData}}
-pub unsafe fn call(&self,values:&[Value])->Result<Value,String>{if values.len()!=self.arguments.len(){return Err(format!("expected {} arguments, got {}",self.arguments.len(),values.len()))}for(i,(v,t))in values.iter().zip(self.arguments.iter()).enumerate(){validate_value(i,v,t)?}let mut storage=Vec::with_capacity(values.len());let mut pointers=Vec::with_capacity(values.len());for v in values{let mut b=value_to_bytes(v)?;pointers.push(b.as_mut_ptr() as *mut ());storage.push(b);}let mut result=AlignedBuffer::new(value_size(&self.return_type)?,value_alignment(&self.return_type)?);let mut captures_data=std::ptr::null_mut();let mut args_data=pointers.as_mut_ptr() as *mut ();let mut result_data=result.as_mut_ptr() as *mut ();let mut args=[&mut captures_data as *mut *mut () as *mut (),&mut args_data as *mut *mut () as *mut (),&mut result_data as *mut *mut () as *mut ()];self.engine.invoke_packed(&self.function_name,&mut args).map_err(|e|format!("failed to invoke dynamic JIT function: {:?}",e))?;std::hint::black_box(&storage);bytes_to_value(result.as_ptr(),&self.return_type)}}
-fn validate_value(index:usize,value:&Value,expected:&TypeInfo)->Result<(),String>{let valid=matches!((value,expected),(Value::Bool(_),TypeInfo::Bool)|(Value::I8(_),TypeInfo::I8)|(Value::I16(_),TypeInfo::I16)|(Value::I32(_),TypeInfo::I32)|(Value::I64(_),TypeInfo::I64)|(Value::I128(_),TypeInfo::I128)|(Value::U8(_),TypeInfo::U8)|(Value::U16(_),TypeInfo::U16)|(Value::U32(_),TypeInfo::U32)|(Value::U64(_),TypeInfo::U64)|(Value::U128(_),TypeInfo::U128)|(Value::Usize(_),TypeInfo::Usize)|(Value::F32(_),TypeInfo::F32)|(Value::F64(_),TypeInfo::F64));if valid{Ok(())}else{Err(format!("argument {} has type {:?}, expected {:?}",index,value,expected))}}
-fn value_to_bytes(value:&Value)->Result<AlignedBuffer,String>{match value{Value::Bool(v)=>scalar_to_buffer(*v),Value::I8(v)=>scalar_to_buffer(*v),Value::I16(v)=>scalar_to_buffer(*v),Value::I32(v)=>scalar_to_buffer(*v),Value::I64(v)=>scalar_to_buffer(*v),Value::I128(v)=>scalar_to_buffer(*v),Value::U8(v)=>scalar_to_buffer(*v),Value::U16(v)=>scalar_to_buffer(*v),Value::U32(v)=>scalar_to_buffer(*v),Value::U64(v)=>scalar_to_buffer(*v),Value::U128(v)=>scalar_to_buffer(*v),Value::Usize(v)=>scalar_to_buffer(*v as u64),Value::F32(v)=>scalar_to_buffer(*v),Value::F64(v)=>scalar_to_buffer(*v),_=>Err(format!("dynamic invocation does not yet support value {:?}",value))}}
-fn scalar_to_buffer<T:Copy>(value:T)->Result<AlignedBuffer,String>{let mut b=AlignedBuffer::new(std::mem::size_of::<T>(),std::mem::align_of::<T>());unsafe{(b.as_mut_ptr() as *mut T).write(value)}Ok(b)}
-fn bytes_to_value(pointer:*const u8,t:&TypeInfo)->Result<Value,String>{unsafe{match t{TypeInfo::Bool=>Ok(Value::Bool(*(pointer as *const bool))),TypeInfo::I8=>Ok(Value::I8(*(pointer as *const i8))),TypeInfo::I16=>Ok(Value::I16(*(pointer as *const i16))),TypeInfo::I32=>Ok(Value::I32(*(pointer as *const i32))),TypeInfo::I64=>Ok(Value::I64(*(pointer as *const i64))),TypeInfo::I128=>Ok(Value::I128(*(pointer as *const i128))),TypeInfo::U8=>Ok(Value::U8(*(pointer as *const u8))),TypeInfo::U16=>Ok(Value::U16(*(pointer as *const u16))),TypeInfo::U32=>Ok(Value::U32(*(pointer as *const u32))),TypeInfo::U64=>Ok(Value::U64(*(pointer as *const u64))),TypeInfo::U128=>Ok(Value::U128(*(pointer as *const u128))),TypeInfo::Usize=>Ok(Value::Usize(*(pointer as *const u64) as usize)),TypeInfo::F32=>Ok(Value::F32(*(pointer as *const f32))),TypeInfo::F64=>Ok(Value::F64(*(pointer as *const f64))),_=>Err("dynamic result decoding for this type is not implemented yet".into())}}}
-fn value_size(t:&TypeInfo)->Result<usize,String>{match t{TypeInfo::Bool=>Ok(std::mem::size_of::<bool>()),TypeInfo::I8=>Ok(1),TypeInfo::I16=>Ok(2),TypeInfo::I32=>Ok(4),TypeInfo::I64=>Ok(8),TypeInfo::I128=>Ok(16),TypeInfo::U8=>Ok(1),TypeInfo::U16=>Ok(2),TypeInfo::U32=>Ok(4),TypeInfo::U64=>Ok(8),TypeInfo::U128=>Ok(16),TypeInfo::Usize=>Ok(8),TypeInfo::F32=>Ok(4),TypeInfo::F64=>Ok(8),_=>Err("dynamic size calculation for this type is not implemented yet".into())}}
-fn value_alignment(t:&TypeInfo)->Result<usize,String>{match t{TypeInfo::Bool=>Ok(1),TypeInfo::I8|TypeInfo::U8=>Ok(1),TypeInfo::I16|TypeInfo::U16=>Ok(2),TypeInfo::I32|TypeInfo::U32|TypeInfo::F32=>Ok(4),TypeInfo::I64|TypeInfo::U64|TypeInfo::Usize|TypeInfo::F64=>Ok(8),TypeInfo::I128|TypeInfo::U128=>Ok(16),_=>Err("dynamic alignment calculation for this type is not implemented yet".into())}}
-struct AlignedBuffer{storage:Vec<u8>}
-impl AlignedBuffer{fn new(size:usize,alignment:usize)->Self{let extra=alignment.saturating_sub(1);Self{storage:vec![0;size+extra]}}fn as_ptr(&self)->*const u8{self.storage.as_ptr()}fn as_mut_ptr(&mut self)->*mut u8{self.storage.as_mut_ptr()}}
+pub struct DynamicCompiledClosure<'ctx> {
+    pub(crate) engine: ExecutionEngine,
+    pub(crate) function_name: String,
+    pub(crate) arguments: Vec<TypeInfo>,
+    pub(crate) return_type: TypeInfo,
+    pub(crate) _context: PhantomData<&'ctx ()>,
+}
+impl<'ctx> DynamicCompiledClosure<'ctx> {
+    pub(crate) fn new(
+        engine: ExecutionEngine,
+        function_name: String,
+        arguments: Vec<TypeInfo>,
+        return_type: TypeInfo,
+    ) -> Self {
+        Self {
+            engine,
+            function_name,
+            arguments,
+            return_type,
+            _context: PhantomData,
+        }
+    }
+    pub unsafe fn call(&self, values: &[Value]) -> Result<Value, String> {
+        if values.len() != self.arguments.len() {
+            return Err(format!(
+                "expected {} arguments, got {}",
+                self.arguments.len(),
+                values.len()
+            ));
+        }
+        for (i, (v, t)) in values.iter().zip(self.arguments.iter()).enumerate() {
+            validate_value(i, v, t)?
+        }
+        let mut storage = Vec::with_capacity(values.len());
+        let mut pointers = Vec::with_capacity(values.len());
+        for v in values {
+            let mut b = value_to_bytes(v)?;
+            pointers.push(b.as_mut_ptr() as *mut ());
+            storage.push(b);
+        }
+        let mut result = AlignedBuffer::new(
+            value_size(&self.return_type)?,
+            value_alignment(&self.return_type)?,
+        );
+        let mut captures_data = std::ptr::null_mut();
+        let mut args_data = pointers.as_mut_ptr() as *mut ();
+        let mut result_data = result.as_mut_ptr() as *mut ();
+        let mut args = [
+            &mut captures_data as *mut *mut () as *mut (),
+            &mut args_data as *mut *mut () as *mut (),
+            &mut result_data as *mut *mut () as *mut (),
+        ];
+        self.engine
+            .invoke_packed(&self.function_name, &mut args)
+            .map_err(|e| format!("failed to invoke dynamic JIT function: {:?}", e))?;
+        std::hint::black_box(&storage);
+        bytes_to_value(result.as_ptr(), &self.return_type)
+    }
+}
+fn validate_value(index: usize, value: &Value, expected: &TypeInfo) -> Result<(), String> {
+    let valid = matches!(
+        (value, expected),
+        (Value::Bool(_), TypeInfo::Bool)
+            | (Value::I8(_), TypeInfo::I8)
+            | (Value::I16(_), TypeInfo::I16)
+            | (Value::I32(_), TypeInfo::I32)
+            | (Value::I64(_), TypeInfo::I64)
+            | (Value::I128(_), TypeInfo::I128)
+            | (Value::U8(_), TypeInfo::U8)
+            | (Value::U16(_), TypeInfo::U16)
+            | (Value::U32(_), TypeInfo::U32)
+            | (Value::U64(_), TypeInfo::U64)
+            | (Value::U128(_), TypeInfo::U128)
+            | (Value::Usize(_), TypeInfo::Usize)
+            | (Value::F32(_), TypeInfo::F32)
+            | (Value::F64(_), TypeInfo::F64)
+    );
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "argument {} has type {:?}, expected {:?}",
+            index, value, expected
+        ))
+    }
+}
+fn value_to_bytes(value: &Value) -> Result<AlignedBuffer, String> {
+    match value {
+        Value::Bool(v) => scalar_to_buffer(*v),
+        Value::I8(v) => scalar_to_buffer(*v),
+        Value::I16(v) => scalar_to_buffer(*v),
+        Value::I32(v) => scalar_to_buffer(*v),
+        Value::I64(v) => scalar_to_buffer(*v),
+        Value::I128(v) => scalar_to_buffer(*v),
+        Value::U8(v) => scalar_to_buffer(*v),
+        Value::U16(v) => scalar_to_buffer(*v),
+        Value::U32(v) => scalar_to_buffer(*v),
+        Value::U64(v) => scalar_to_buffer(*v),
+        Value::U128(v) => scalar_to_buffer(*v),
+        Value::Usize(v) => scalar_to_buffer(*v as u64),
+        Value::F32(v) => scalar_to_buffer(*v),
+        Value::F64(v) => scalar_to_buffer(*v),
+        _ => Err(format!(
+            "dynamic invocation does not yet support value {:?}",
+            value
+        )),
+    }
+}
+fn scalar_to_buffer<T: Copy>(value: T) -> Result<AlignedBuffer, String> {
+    let mut b = AlignedBuffer::new(std::mem::size_of::<T>(), std::mem::align_of::<T>());
+    unsafe { (b.as_mut_ptr() as *mut T).write(value) }
+    Ok(b)
+}
+fn bytes_to_value(pointer: *const u8, t: &TypeInfo) -> Result<Value, String> {
+    unsafe {
+        match t {
+            TypeInfo::Bool => Ok(Value::Bool(*(pointer as *const bool))),
+            TypeInfo::I8 => Ok(Value::I8(*(pointer as *const i8))),
+            TypeInfo::I16 => Ok(Value::I16(*(pointer as *const i16))),
+            TypeInfo::I32 => Ok(Value::I32(*(pointer as *const i32))),
+            TypeInfo::I64 => Ok(Value::I64(*(pointer as *const i64))),
+            TypeInfo::I128 => Ok(Value::I128(*(pointer as *const i128))),
+            TypeInfo::U8 => Ok(Value::U8(*(pointer as *const u8))),
+            TypeInfo::U16 => Ok(Value::U16(*(pointer as *const u16))),
+            TypeInfo::U32 => Ok(Value::U32(*(pointer as *const u32))),
+            TypeInfo::U64 => Ok(Value::U64(*(pointer as *const u64))),
+            TypeInfo::U128 => Ok(Value::U128(*(pointer as *const u128))),
+            TypeInfo::Usize => Ok(Value::Usize(*(pointer as *const u64) as usize)),
+            TypeInfo::F32 => Ok(Value::F32(*(pointer as *const f32))),
+            TypeInfo::F64 => Ok(Value::F64(*(pointer as *const f64))),
+            _ => Err("dynamic result decoding for this type is not implemented yet".into()),
+        }
+    }
+}
+fn value_size(t: &TypeInfo) -> Result<usize, String> {
+    match t {
+        TypeInfo::Bool => Ok(std::mem::size_of::<bool>()),
+        TypeInfo::I8 => Ok(1),
+        TypeInfo::I16 => Ok(2),
+        TypeInfo::I32 => Ok(4),
+        TypeInfo::I64 => Ok(8),
+        TypeInfo::I128 => Ok(16),
+        TypeInfo::U8 => Ok(1),
+        TypeInfo::U16 => Ok(2),
+        TypeInfo::U32 => Ok(4),
+        TypeInfo::U64 => Ok(8),
+        TypeInfo::U128 => Ok(16),
+        TypeInfo::Usize => Ok(8),
+        TypeInfo::F32 => Ok(4),
+        TypeInfo::F64 => Ok(8),
+        _ => Err("dynamic size calculation for this type is not implemented yet".into()),
+    }
+}
+fn value_alignment(t: &TypeInfo) -> Result<usize, String> {
+    match t {
+        TypeInfo::Bool => Ok(1),
+        TypeInfo::I8 | TypeInfo::U8 => Ok(1),
+        TypeInfo::I16 | TypeInfo::U16 => Ok(2),
+        TypeInfo::I32 | TypeInfo::U32 | TypeInfo::F32 => Ok(4),
+        TypeInfo::I64 | TypeInfo::U64 | TypeInfo::Usize | TypeInfo::F64 => Ok(8),
+        TypeInfo::I128 | TypeInfo::U128 => Ok(16),
+        _ => Err("dynamic alignment calculation for this type is not implemented yet".into()),
+    }
+}
+struct AlignedBuffer {
+    storage: Vec<u8>,
+}
+impl AlignedBuffer {
+    fn new(size: usize, alignment: usize) -> Self {
+        let extra = alignment.saturating_sub(1);
+        Self {
+            storage: vec![0; size + extra],
+        }
+    }
+    fn as_ptr(&self) -> *const u8 {
+        self.storage.as_ptr()
+    }
+    fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.storage.as_mut_ptr()
+    }
+}

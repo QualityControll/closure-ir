@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
 
+use crate::parser::CallInput;
 use quote::quote;
 use syn::parse_macro_input;
-use crate::parser::CallInput;
 
 pub(crate) fn expand(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as CallInput);
