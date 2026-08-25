@@ -137,29 +137,12 @@ fn infer_binary(
             | syn::BinOp::Ge(_)
     );
 
-    if !is_comparison {
-        if let Some(t) = expected {
-            if let Some(found) = infer_in_expr(
-                &binary.left,
-                name,
-                arguments,
-                locals,
-                Some(t),
-            ) {
-                return Some(found);
-            }
-            if let Some(found) = infer_in_expr(
-                &binary.right,
-                name,
-                arguments,
-                locals,
-                Some(t),
-            ) {
-                return Some(found);
-            }
-        }
-    }
-
+    // `expected` describes the result of the binary expression, not
+    // necessarily the operand type. In particular, an expression such as
+    // `-2.0 * pi / (n as f64)` may have an expected result type of `usize`
+    // because the surrounding closure returns `usize`, while the operands
+    // are actually `f64`. Do not propagate the result type into an unknown
+    // operand before looking for a type from the other operand.
     let left_type = expression_type(&binary.left, arguments, locals);
     let right_type = expression_type(&binary.right, arguments, locals);
 
@@ -187,22 +170,22 @@ fn infer_binary(
         }
     }
 
-    infer_in_expr(
-        &binary.left,
-        name,
-        arguments,
-        locals,
-        expected,
-    )
-    .or_else(|| {
-        infer_in_expr(
-            &binary.right,
-            name,
-            arguments,
-            locals,
-            expected,
-        )
-    })
+    // For comparisons the result is always bool, so it is especially
+    // important that `expected` is not used as an operand type. If neither
+    // side supplied a type, fall back to recursive inference without forcing
+    // the result type onto the operands.
+    infer_in_expr(&binary.left, name, arguments, locals, None)
+        .or_else(|| infer_in_expr(&binary.right, name, arguments, locals, None))
+        .or_else(|| {
+            if is_comparison {
+                None
+            } else {
+                expected.and_then(|t| {
+                    infer_in_expr(&binary.left, name, arguments, locals, Some(t))
+                        .or_else(|| infer_in_expr(&binary.right, name, arguments, locals, Some(t)))
+                })
+            }
+        })
 }
 
 fn infer_in_expr(
