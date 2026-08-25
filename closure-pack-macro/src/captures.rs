@@ -105,12 +105,16 @@ fn infer_expr_block(
                 }
 
                 if let Some(init) = &local.init {
+                    // The type of a local initializer comes from its annotation or
+                    // from the initializer itself. Do not use the closure return
+                    // type here: doing so can incorrectly infer an unrelated
+                    // capture (for example `PI`) as the closure's return type.
                     if let Some(found) = infer_in_expr(
                         &init.expr,
                         name,
                         arguments,
                         &current,
-                        ty.as_ref().or(expected),
+                        ty.as_ref(),
                     ) {
                         return Some(found);
                     }
@@ -125,7 +129,11 @@ fn infer_expr_block(
         }
     }
 
-    expected.cloned()
+    // `expected` only describes the type of the block's result. If the capture
+    // was not found anywhere in the block, returning it here would assign the
+    // return type to an unrelated capture. The capture must be observed in an
+    // expression before an expected type can be used to infer it.
+    None
 }
 
 fn infer_binary(
