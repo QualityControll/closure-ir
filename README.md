@@ -2,15 +2,15 @@
 
 A portable intermediate representation for Rust closures.
 
-`closure-ir` is an experimental Rust project that turns Rust closures into an intermediate representation (IR), then lowers that representation to LLVM and JIT-compiles it with [Inkwell](https://github.com/TheDan64/inkwell).
+`closure-ir` is an experimental Rust project that turns Rust closures into an intermediate representation (IR), then lowers that representation to **MLIR using the LLVM dialect** and JIT-compiles it through MLIR's LLVM translation and execution infrastructure.
 
 The project explores a longer-term question: **can a Rust closure become a portable, serializable executable representation that can be transported to another execution environment and compiled there?**
 
-> **Status:** Experimental / proof of concept. The current implementation supports only a small subset of Rust expressions and types. Remote/distributed execution is exploratory future work and is not currently implemented.
+> **Status:** Experimental / proof of concept. The current implementation supports a growing subset of Rust expressions and types. Remote/distributed execution is exploratory future work and is not currently implemented.
 
 ## What makes this different?
 
-Traditional RPC and distributed runtimes generally send **arguments to a function that is already compiled into the remote application**. For example, an active-message system can identify a registered operation and send it serialized state:
+Traditional RPC and distributed runtimes generally send **arguments to a function that is already compiled into the remote application**. For example, an active-message system can identify a registered operation and send its serialized state:
 
 ```text
 function / AM ID + arguments
@@ -41,7 +41,10 @@ Rust closure
 remote execution environment
      |
      v
-   LLVM / JIT
+      MLIR
+     |
+     v
+LLVM dialect / JIT
      |
      v
   execute
@@ -58,7 +61,7 @@ This could eventually enable use cases such as:
 - distributed execution of user-defined computations
 - sending computations to machines that do not have the original closure compiled into their application
 
-These capabilities are future goals; the current project is focused on building the closure IR, type metadata, lowering, and LLVM execution pieces needed to explore them.
+These capabilities are future goals; the current project is focused on building the closure IR, type metadata, MLIR lowering, and JIT execution pieces needed to explore them.
 
 ## Goals
 
@@ -68,9 +71,9 @@ The current implementation explores whether Rust's compiler-visible syntax and p
 2. Inspects its syntax at compile time using a procedural macro.
 3. Converts the closure into a language-independent IR.
 4. Uses generated type metadata to understand user-defined Rust types.
-5. Lowers the IR into LLVM IR.
-6. JIT-compiles the resulting LLVM code.
-7. Executes the generated function.
+5. Lowers the IR into MLIR.
+6. Uses MLIR's LLVM dialect and LLVM translation infrastructure to produce executable code.
+7. JIT-compiles and executes the resulting function.
 8. Eventually provides a representation that can be serialized independently of the original process.
 
 ## Architecture
@@ -93,6 +96,24 @@ closure-ir/
     └── src/
         ├── main.rs
         └── fft.rs
+```
+
+The compilation pipeline is:
+
+```text
+Rust closure
+     ↓
+procedural macro
+     ↓
+closure IR + type metadata
+     ↓
+MLIR
+     ↓
+LLVM dialect
+     ↓
+LLVM translation / JIT
+     ↓
+execute
 ```
 
 ## Example
@@ -255,9 +276,9 @@ This is complementary to a distributed runtime rather than an attempt to replace
 
 ## Roadmap
 
- - [x] Generalize LLVM type lowering
+ - [x] Generalize MLIR/LLVM type lowering
  - [x] Complete struct argument lowering
- - [x] Struct field access in LLVM
+ - [x] Struct field access
  - [x] Floating-point expressions
  - [x] Boolean expressions
  - [x] Comparisons
@@ -267,15 +288,15 @@ This is complementary to a distributed runtime rather than an attempt to replace
  - [x] Multiple statements
  - [ ] Function calls
  - [x] Nested expressions
- - [ ] Arrays
+ - [x] Arrays
  - [x] Tuples
  - [x] Struct literals
  - [ ] Enums
  - [ ] Generic types
  - [ ] Better error reporting
- - [ ] LLVM optimization passes
+ - [ ] MLIR/LLVM optimization passes
  - [ ] A stable executable-function API
- - [ ] Benchmark generated LLVM against native Rust
+ - [ ] Benchmark generated code against native Rust
  - [ ] Support more complex user-defined types
  - [ ] Explore automatic serialization/deserialization
  - [ ] Explore distributed execution
