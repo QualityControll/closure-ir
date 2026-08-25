@@ -20,13 +20,30 @@ fn pat_ident(pat: &Pat) -> Option<&Ident> {
 }
 
 struct CaptureVisitor {
+    bound: BTreeSet<String>,
     names: BTreeSet<String>,
+}
+
+impl CaptureVisitor {
+    fn new(arguments: &[ClosureArgument]) -> Self {
+        let mut bound = BTreeSet::new();
+        for argument in arguments {
+            bound.insert(argument.name.to_string());
+        }
+        Self {
+            bound,
+            names: BTreeSet::new(),
+        }
+    }
 }
 
 impl<'ast> Visit<'ast> for CaptureVisitor {
     fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
         if node.path.segments.len() == 1 {
-            self.names.insert(node.path.segments[0].ident.to_string());
+            let name = node.path.segments[0].ident.to_string();
+            if !self.bound.contains(&name) && name != "self" {
+                self.names.insert(name);
+            }
         }
         visit::visit_expr_path(self, node);
     }
@@ -35,6 +52,24 @@ impl<'ast> Visit<'ast> for CaptureVisitor {
         for arg in &node.args {
             self.visit_expr(arg);
         }
+    }
+
+    fn visit_local(&mut self, node: &'ast syn::Local) {
+        // The initializer is evaluated before the local is bound.
+        if let Some(init) = &node.init {
+            self.visit_expr(&init.expr);
+        }
+        if let Some(ident) = pat_ident(&node.pat) {
+            self.bound.insert(ident.to_string());
+        }
+    }
+
+    fn visit_expr_for_loop(&mut self, node: &'ast syn::ExprForLoop) {
+        self.visit_expr(&node.expr);
+        if let Some(ident) = pat_ident(&node.pat) {
+            self.bound.insert(ident.to_string());
+        }
+        self.visit_block(&node.body);
     }
 }
 
@@ -71,19 +106,7 @@ fn infer_expr_block(
         match stmt {
             syn::Stmt::Local(local) => {
                 let ty = match &local.pat {
-                    Pat::Type(p) => local
-                        .init
-                        .as_ref()
-                        .and_then(|i| {
-                            infer_in_expr(
-                                &i.expr,
-                                name,
-                                arguments,
-                                &current,
-                                Some(&p.ty),
-                            )
-                        })
-                        .or_else(|| Some((*p.ty).clone())),
+                    Pat::Type(p) => Some((*p.ty).clone()),
                     _ => local.init.as_ref().and_then(|i| {
                         infer_in_expr(&i.expr, name, arguments, &current, None)
                             .or_else(|| expression_type(&i.expr, arguments, &current))
@@ -101,6 +124,18 @@ fn infer_expr_block(
                         ),
                     });
                 }
+
+                if let Some(init) = &local.init {
+                    if let Some(found) = infer_in_expr(
+                        &init.expr,
+                        name,
+                        arguments,
+                        &current,
+                        ty.as_ref().or(expected),
+                    ) {
+                        return Some(found);
+                    }
+                }
             }
             syn::Stmt::Expr(expr, _) => {
                 if let Some(ty) = infer_in_expr(
@@ -117,7 +152,7 @@ fn infer_expr_block(
         }
     }
 
-    None
+    expected.cloned()
 }
 
 fn infer_binary(
@@ -127,22 +162,9 @@ fn infer_binary(
     locals: &[LocalVariable],
     expected: Option<&Type>,
 ) -> Option<Type> {
-    let is_comparison = matches!(
-        binary.op,
-        syn::BinOp::Eq(_)
-            | syn::BinOp::Ne(_)
-            | syn::BinOp::Lt(_)
-            | syn::BinOp::Le(_)
-            | syn::BinOp::Gt(_)
-            | syn::BinOp::Ge(_)
-    );
-
-    // `expected` describes the result of the binary expression, not
-    // necessarily the operand type. In particular, an expression such as
-    // `-2.0 * pi / (n as f64)` may have an expected result type of `usize`
-    // because the surrounding closure returns `usize`, while the operands
-    // are actually `f64`. Do not propagate the result type into an unknown
-    // operand before looking for a type from the other operand.
+    // Infer an unknown operand from the other operand's type. This is
+    // essential for captures such as `pi` in `-2.0 * pi / (length as f64)`:
+    // the closure's return type must never be used as the operand type.
     let left_type = expression_type(&binary.left, arguments, locals);
     let right_type = expression_type(&binary.right, arguments, locals);
 
@@ -170,21 +192,15 @@ fn infer_binary(
         }
     }
 
-    // For comparisons the result is always bool, so it is especially
-    // important that `expected` is not used as an operand type. If neither
-    // side supplied a type, fall back to recursive inference without forcing
-    // the result type onto the operands.
+    // If neither side has a directly known type, recurse without forcing
+    // the surrounding expression's result type onto either operand.
     infer_in_expr(&binary.left, name, arguments, locals, None)
         .or_else(|| infer_in_expr(&binary.right, name, arguments, locals, None))
         .or_else(|| {
-            if is_comparison {
-                None
-            } else {
-                expected.and_then(|t| {
-                    infer_in_expr(&binary.left, name, arguments, locals, Some(t))
-                        .or_else(|| infer_in_expr(&binary.right, name, arguments, locals, Some(t)))
-                })
-            }
+            expected.and_then(|t| {
+                infer_in_expr(&binary.left, name, arguments, locals, Some(t))
+                    .or_else(|| infer_in_expr(&binary.right, name, arguments, locals, Some(t)))
+            })
         })
 }
 
@@ -349,25 +365,18 @@ pub(crate) fn discover(
     body: &syn::Block,
     arguments: &[ClosureArgument],
 ) -> Vec<Capture> {
-    let mut refs = CaptureVisitor {
-        names: BTreeSet::new(),
-    };
-    refs.visit_block(body);
-
     let mut locals = LocalCollector {
         names: BTreeSet::new(),
     };
     locals.visit_block(body);
 
-    let bound: BTreeSet<String> = arguments
-        .iter()
-        .map(|argument| argument.name.to_string())
-        .chain(locals.names)
-        .collect();
+    let mut visitor = CaptureVisitor::new(arguments);
+    visitor.bound.extend(locals.names);
+    visitor.visit_block(body);
 
-    refs.names
+    visitor
+        .names
         .into_iter()
-        .filter(|name| name.as_str() != "self" && !bound.contains(name))
         .map(|name| Capture {
             name: Ident::new(&name, proc_macro2::Span::call_site()),
             type_info: None,
