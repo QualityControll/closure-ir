@@ -2,6 +2,101 @@ use crate::{expr::{Expr, Intrinsic}, operators::expression_type, types::TypeInfo
 use super::{MlirBuilder, Ref, RefKind};
 
 impl<'a> MlirBuilder<'a> {
-    fn expr_type(&self,e:&Expr)->Result<TypeInfo,String>{let types=self.refs.iter().map(|r|r.ty.clone()).collect::<Vec<_>>();expression_type(&types,e)}
-    pub(crate) fn lower_expr(&mut self,e:&Expr,expected:&TypeInfo)->Result<Ref,String>{match e{Expr::Argument(i)=>{if *i<self.args.len(){return Ok(self.args[*i].clone());}let ref_index=self.closure.captures.len()+*i;self.refs.get(ref_index).cloned().ok_or_else(||format!("argument/local index {} out of bounds",i)).map(|r|if r.kind==RefKind::Address{Ref{name:self.load(&r.name,&r.ty),ty:r.ty,kind:RefKind::Value}}else{r})},Expr::Capture(i)=>self.refs.get(*i).cloned().ok_or_else(||format!("capture index {} out of bounds",i)),Expr::Constant(v)=>self.constant(v),Expr::Cast{expr,source_type,target_type}=>{let a=self.lower_ref(expr,source_type)?;self.cast(a,target_type)},Expr::Index{sequence,index}=>{let a=self.index_address(sequence,index)?;Ok(Ref{name:self.load(&a.name,&a.ty),ty:a.ty,kind:RefKind::Value})},Expr::Len{sequence}=>{let a=self.address_of_expr(sequence)?;match a.ty{TypeInfo::Array{length,..}=>Ok(Ref{name:self.c_i64(length as i64),ty:TypeInfo::Usize,kind:RefKind::Value}),TypeInfo::Slice{..}=>{let p=self.gep_const(&a.name,&a.ty,&[0,1]);Ok(Ref{name:self.load(&p,&TypeInfo::Usize),ty:TypeInfo::Usize,kind:RefKind::Value})},_=>Err("len() requires a sequence".into())}},Expr::Field{object,name}=>{let a=self.address_of_expr(object)?;let fields=match &a.ty{TypeInfo::Struct{fields,..}=>fields,_=>return Err("field access requires struct".into())};let(i,f)=fields.iter().enumerate().find(|(_,f)|f.name==*name).ok_or_else(||format!("field `{}` not found",name))?;let p=self.gep_const(&a.name,&a.ty,&[0,i]);Ok(Ref{name:self.load(&p,&f.type_info),ty:f.type_info.clone(),kind:RefKind::Value})},Expr::Struct{type_info,fields}=>self.aggregate(type_info,fields),Expr::Tuple{elements}=>{let ty=self.expr_type(e)?;let fields=elements.iter().enumerate().map(|(i,e)|(i.to_string(),e.clone())).collect::<Vec<_>>();self.aggregate(&ty,&fields)},Expr::Intrinsic{intrinsic,arguments}=>self.intrinsic(*intrinsic,arguments),Expr::IfElse{condition,then_branch,else_branch}=>self.if_expr(condition,then_branch,else_branch,expected),Expr::Add{lhs,rhs}=>self.binary("add",lhs,rhs,expected),Expr::Sub{lhs,rhs}=>self.binary("sub",lhs,rhs,expected),Expr::Mul{lhs,rhs}=>self.binary("mul",lhs,rhs,expected),Expr::Div{lhs,rhs}=>self.binary("div",lhs,rhs,expected),Expr::Rem{lhs,rhs}=>self.binary("rem",lhs,rhs,expected),Expr::Eq{lhs,rhs}=>self.compare("eq",lhs,rhs),Expr::Ne{lhs,rhs}=>self.compare("ne",lhs,rhs),Expr::Lt{lhs,rhs}=>self.compare("lt",lhs,rhs),Expr::Le{lhs,rhs}=>self.compare("le",lhs,rhs),Expr::Gt{lhs,rhs}=>self.compare("gt",lhs,rhs),Expr::Ge{lhs,rhs}=>self.compare("ge",lhs,rhs),Expr::And{lhs,rhs}=>self.logical("and",lhs,rhs),Expr::Or{lhs,rhs}=>self.logical("or",lhs,rhs),Expr::BitAnd{lhs,rhs}=>self.binary("and",lhs,rhs,expected),Expr::BitOr{lhs,rhs}=>self.binary("or",lhs,rhs,expected),Expr::BitXor{lhs,rhs}=>self.binary("xor",lhs,rhs,expected),Expr::Shl{lhs,rhs}=>self.binary("shl",lhs,rhs,expected),Expr::Shr{lhs,rhs}=>self.binary(if expected.is_signed_integer(){"ashr"}else{"lshr"},lhs,rhs,expected),Expr::Not{operand}=>{let a=self.lower_expr(operand,&TypeInfo::Bool)?;let one=self.c_bool(true);let n=self.value();self.text.push_str(&format!("    {} = llvm.xor {}, {} : i1\n",n,a.name,one));Ok(Ref{name:n,ty:TypeInfo::Bool,kind:RefKind::Value})},Expr::Neg{operand}=>{let a=self.lower_expr(operand,expected)?;let n=self.value();if expected.is_float(){self.text.push_str(&format!("    {} = llvm.fneg {} : {}\n",n,a.name,Self::ty(expected)))}else{let z=self.c_int("0",&Self::ty(expected));self.text.push_str(&format!("    {} = llvm.sub {}, {} : {}\n",n,z,a.name,Self::ty(expected))}Ok(Ref{name:n,ty:expected.clone(),kind:RefKind::Value})}}}
+    fn expr_type(&self, e: &Expr) -> Result<TypeInfo, String> {
+        let types = self.refs.iter().map(|r| r.ty.clone()).collect::<Vec<_>>();
+        expression_type(&types, e)
+    }
+
+    pub(crate) fn lower_expr(&mut self, e: &Expr, expected: &TypeInfo) -> Result<Ref, String> {
+        match e {
+            Expr::Argument(i) => {
+                if *i < self.args.len() {
+                    return Ok(self.args[*i].clone());
+                }
+                let ref_index = self.closure.captures.len() + *i;
+                self.refs.get(ref_index).cloned()
+                    .ok_or_else(|| format!("argument/local index {} out of bounds", i))
+                    .map(|r| if r.kind == RefKind::Address {
+                        Ref { name: self.load(&r.name, &r.ty), ty: r.ty, kind: RefKind::Value }
+                    } else { r })
+            }
+            Expr::Capture(i) => self.refs.get(*i).cloned()
+                .ok_or_else(|| format!("capture index {} out of bounds", i)),
+            Expr::Constant(v) => self.constant(v),
+            Expr::Cast { expr, source_type, target_type } => {
+                let a = self.lower_ref(expr, source_type)?;
+                self.cast(a, target_type)
+            }
+            Expr::Index { sequence, index } => {
+                let a = self.index_address(sequence, index)?;
+                Ok(Ref { name: self.load(&a.name, &a.ty), ty: a.ty, kind: RefKind::Value })
+            }
+            Expr::Len { sequence } => {
+                let a = self.address_of_expr(sequence)?;
+                match a.ty {
+                    TypeInfo::Array { length, .. } => Ok(Ref { name: self.c_i64(length as i64), ty: TypeInfo::Usize, kind: RefKind::Value }),
+                    TypeInfo::Slice { .. } => {
+                        let p = self.gep_const(&a.name, &a.ty, &[0, 1]);
+                        Ok(Ref { name: self.load(&p, &TypeInfo::Usize), ty: TypeInfo::Usize, kind: RefKind::Value })
+                    }
+                    _ => Err("len() requires a sequence".into()),
+                }
+            }
+            Expr::Field { object, name } => {
+                let a = self.address_of_expr(object)?;
+                let fields = match &a.ty {
+                    TypeInfo::Struct { fields, .. } => fields,
+                    _ => return Err("field access requires struct".into()),
+                };
+                let (i, f) = fields.iter().enumerate().find(|(_, f)| f.name == *name)
+                    .ok_or_else(|| format!("field `{}` not found", name))?;
+                let p = self.gep_const(&a.name, &a.ty, &[0, i]);
+                Ok(Ref { name: self.load(&p, &f.type_info), ty: f.type_info.clone(), kind: RefKind::Value })
+            }
+            Expr::Struct { type_info, fields } => self.aggregate(type_info, fields),
+            Expr::Tuple { elements } => {
+                let ty = self.expr_type(e)?;
+                let fields = elements.iter().enumerate().map(|(i, e)| (i.to_string(), e.clone())).collect::<Vec<_>>();
+                self.aggregate(&ty, &fields)
+            }
+            Expr::Intrinsic { intrinsic, arguments } => self.intrinsic(*intrinsic, arguments),
+            Expr::IfElse { condition, then_branch, else_branch } => self.if_expr(condition, then_branch, else_branch, expected),
+            Expr::Add { lhs, rhs } => self.binary("add", lhs, rhs, expected),
+            Expr::Sub { lhs, rhs } => self.binary("sub", lhs, rhs, expected),
+            Expr::Mul { lhs, rhs } => self.binary("mul", lhs, rhs, expected),
+            Expr::Div { lhs, rhs } => self.binary("div", lhs, rhs, expected),
+            Expr::Rem { lhs, rhs } => self.binary("rem", lhs, rhs, expected),
+            Expr::Eq { lhs, rhs } => self.compare("eq", lhs, rhs),
+            Expr::Ne { lhs, rhs } => self.compare("ne", lhs, rhs),
+            Expr::Lt { lhs, rhs } => self.compare("lt", lhs, rhs),
+            Expr::Le { lhs, rhs } => self.compare("le", lhs, rhs),
+            Expr::Gt { lhs, rhs } => self.compare("gt", lhs, rhs),
+            Expr::Ge { lhs, rhs } => self.compare("ge", lhs, rhs),
+            Expr::And { lhs, rhs } => self.logical("and", lhs, rhs),
+            Expr::Or { lhs, rhs } => self.logical("or", lhs, rhs),
+            Expr::BitAnd { lhs, rhs } => self.binary("and", lhs, rhs, expected),
+            Expr::BitOr { lhs, rhs } => self.binary("or", lhs, rhs, expected),
+            Expr::BitXor { lhs, rhs } => self.binary("xor", lhs, rhs, expected),
+            Expr::Shl { lhs, rhs } => self.binary("shl", lhs, rhs, expected),
+            Expr::Shr { lhs, rhs } => self.binary(if expected.is_signed_integer() { "ashr" } else { "lshr" }, lhs, rhs, expected),
+            Expr::Not { operand } => {
+                let a = self.lower_expr(operand, &TypeInfo::Bool)?;
+                let one = self.c_bool(true);
+                let n = self.value();
+                self.text.push_str(&format!("    {} = llvm.xor {}, {} : i1\n", n, a.name, one));
+                Ok(Ref { name: n, ty: TypeInfo::Bool, kind: RefKind::Value })
+            }
+            Expr::Neg { operand } => {
+                let a = self.lower_expr(operand, expected)?;
+                let n = self.value();
+                if expected.is_float() {
+                    self.text.push_str(&format!("    {} = llvm.fneg {} : {}\n", n, a.name, Self::ty(expected)));
+                } else {
+                    let z = self.c_int("0", &Self::ty(expected));
+                    self.text.push_str(&format!("    {} = llvm.sub {}, {} : {}\n", n, z, a.name, Self::ty(expected)));
+                }
+                Ok(Ref { name: n, ty: expected.clone(), kind: RefKind::Value })
+            }
+        }
+    }
 }
