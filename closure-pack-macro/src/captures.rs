@@ -26,8 +26,7 @@ struct CaptureVisitor {
 impl<'ast> Visit<'ast> for CaptureVisitor {
     fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
         if node.path.segments.len() == 1 {
-            self.names
-                .insert(node.path.segments[0].ident.to_string());
+            self.names.insert(node.path.segments[0].ident.to_string());
         }
         visit::visit_expr_path(self, node);
     }
@@ -87,6 +86,7 @@ fn infer_expr_block(
                         .or_else(|| Some((*p.ty).clone())),
                     _ => local.init.as_ref().and_then(|i| {
                         infer_in_expr(&i.expr, name, arguments, &current, None)
+                            .or_else(|| expression_type(&i.expr, arguments, &current))
                     }),
                 };
 
@@ -127,10 +127,6 @@ fn infer_binary(
     locals: &[LocalVariable],
     expected: Option<&Type>,
 ) -> Option<Type> {
-    // For arithmetic/bitwise operations, the result type is also the
-    // operand type.  Propagate the expected result type down both sides.
-    // This is important for expressions such as `-2.0 * pi / (n as f64)`,
-    // where the capture itself has no independently known type.
     let is_comparison = matches!(
         binary.op,
         syn::BinOp::Eq(_)
@@ -277,6 +273,13 @@ fn infer_in_expr(
                 expected,
             )
         }),
+        Expr::Block(block) => infer_expr_block(
+            &block.block,
+            name,
+            arguments,
+            locals,
+            expected,
+        ),
         Expr::If(if_expr) => infer_in_expr(
             &if_expr.cond,
             name,
@@ -307,6 +310,54 @@ fn infer_in_expr(
                     )
                 })
         }),
+        Expr::While(while_expr) => infer_in_expr(
+            &while_expr.cond,
+            name,
+            arguments,
+            locals,
+            Some(&syn::parse_quote!(bool)),
+        )
+        .or_else(|| {
+            infer_expr_block(
+                &while_expr.body,
+                name,
+                arguments,
+                locals,
+                expected,
+            )
+        }),
+        Expr::ForLoop(for_expr) => infer_in_expr(
+            &for_expr.expr,
+            name,
+            arguments,
+            locals,
+            None,
+        )
+        .or_else(|| {
+            let mut nested = locals.to_vec();
+            if let Some(ident) = pat_ident(&for_expr.pat) {
+                nested.push(LocalVariable {
+                    name: ident.clone(),
+                    index: nested.len(),
+                    type_info: None,
+                    mutable: false,
+                });
+            }
+            infer_expr_block(
+                &for_expr.body,
+                name,
+                arguments,
+                &nested,
+                expected,
+            )
+        }),
+        Expr::Loop(loop_expr) => infer_expr_block(
+            &loop_expr.body,
+            name,
+            arguments,
+            locals,
+            expected,
+        ),
         _ => None,
     }
 }
