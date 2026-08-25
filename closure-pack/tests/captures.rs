@@ -26,3 +26,16 @@ fn capture_is_stored_in_compiled_environment() {
     assert_eq!(unsafe { compiled.call(&mut first) }, 6);
     assert_eq!(unsafe { compiled.call(&mut second) }, 21);
 }
+
+#[test]
+fn f64_capture_type_is_not_inferred_from_unrelated_local() {
+    let pi = std::f64::consts::PI;
+    let compiled = compile_closure!(|x: f64| -> f64 {
+        let n: usize = 2;
+        let angle = -2.0 * pi / (n as f64);
+        cos(angle) + x * 0.0
+    });
+    let mut args = (0.0_f64,);
+    let result = unsafe { compiled.call(&mut args) };
+    assert!((result + 1.0).abs() < 1e-12);
+}
