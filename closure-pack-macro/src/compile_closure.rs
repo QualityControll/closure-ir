@@ -10,7 +10,7 @@ fn expand_compile_closure(input:ClosureInput)->syn::Result<proc_macro2::TokenStr
  let ClosureInput{arguments,return_type,body}=input;
  let captures=captures::discover(&body.block,&arguments);
  let mut lowering_arguments=arguments.clone();
- for capture in &captures { lowering_arguments.push(ClosureArgument{name:capture.name.clone(),type_info:syn::parse_quote!(()),capture:true}); }
+ for capture in &captures { lowering_arguments.push(ClosureArgument{name:capture.name.clone(),type_info:capture.type_info.clone(),capture:true}); }
  let locals=Vec::new();
  let is_unit=matches!(&return_type,syn::Type::Tuple(tuple) if tuple.elems.is_empty());
  let block=if is_unit{lower_block(&body.block,&lowering_arguments,&locals,None)?}else{lower_block(&body.block,&lowering_arguments,&locals,Some(&return_type))?};
