@@ -24,7 +24,23 @@ pub(crate) struct Ref {
     pub(crate) kind: RefKind,
 }
 
-static GLOBAL_CONTEXT: OnceLock<Context> = OnceLock::new();
+// melior::Context is intentionally !Send + !Sync because MLIR contexts are not
+// thread-safe. closure-pack currently assumes that compilation is single-
+// threaded, so we keep the context behind a raw pointer in the process-wide
+// singleton rather than requiring Context itself to satisfy Sync.
+//
+// The context is leaked for the lifetime of the process. This avoids running
+// its destructor during shutdown, after other MLIR objects may already have
+// been torn down.
+struct GlobalContext(*const Context);
+
+// SAFETY: closure-pack currently requires all compiler/MLIR access to happen
+// from a single thread. This wrapper must not be used to make the global
+// compiler concurrently accessible from multiple threads.
+unsafe impl Send for GlobalContext {}
+unsafe impl Sync for GlobalContext {}
+
+static GLOBAL_CONTEXT: OnceLock<GlobalContext> = OnceLock::new();
 
 fn initialize_context(context: &Context) {
     let registry = DialectRegistry::new();
@@ -46,14 +62,20 @@ impl<'ctx> Compiler<'ctx> {
     ///
     /// The context is initialized lazily on the first call and then reused for
     /// all subsequent compilations. Closure-pack currently assumes compilation
-    /// is single-threaded, so callers should not use this global compiler from
+    /// is single-threaded, so callers must not use this global compiler from
     /// multiple threads concurrently.
     pub fn global() -> Compiler<'static> {
-        let context = GLOBAL_CONTEXT.get_or_init(|| {
-            let context = Context::new();
+        let global = GLOBAL_CONTEXT.get_or_init(|| {
+            let context = Box::new(Context::new());
             initialize_context(&context);
-            context
+            GlobalContext(Box::leak(context) as *const Context)
         });
+
+        // SAFETY: GlobalContext is initialized exactly once and the Context is
+        // deliberately leaked, so the pointed-to Context remains alive for the
+        // remainder of the process. The single-threaded usage restriction is
+        // part of the contract of Compiler::global().
+        let context = unsafe { &*global.0 };
         Compiler { context }
     }
 
