@@ -36,7 +36,7 @@ fn infer_in_expr(expr:&Expr,name:&Ident,arguments:&[ClosureArgument],locals:&[Lo
  Expr::Cast(c)=>infer_in_expr(&c.expr,name,arguments,locals,Some(&*c.ty)),
  Expr::Index(i)=>infer_in_expr(&i.expr,name,arguments,locals,None).or_else(||infer_in_expr(&i.index,name,arguments,locals,Some(&syn::parse_quote!(usize)))),
  Expr::Call(c)=>c.args.iter().find_map(|a|infer_in_expr(a,name,arguments,locals,expected)),
- Expr::If(i)=>infer_in_expr(&i.cond,name,arguments,locals,Some(&syn::parse_quote!(bool)).as_ref()).or_else(||infer_expr_block(&i.then_branch,name,arguments,locals,expected)).or_else(||i.else_branch.as_ref().and_then(|(_,e)|infer_in_expr(e,name,arguments,locals,expected))),
+ Expr::If(i)=>infer_in_expr(&i.cond,name,arguments,locals,Some(&syn::parse_quote!(bool))).or_else(||infer_expr_block(&i.then_branch,name,arguments,locals,expected)).or_else(||i.else_branch.as_ref().and_then(|(_,e)|infer_in_expr(e,name,arguments,locals,expected))),
  _=>None,
 }}
 
