@@ -166,7 +166,32 @@ fn infer_in_expr(
 ) -> Option<Type> {
     match expr {
         Expr::Path(path) if path.path.segments.len() == 1 => {
-            if path.path.segments[0].ident == *name { expected.cloned() } else { None }
+            let path_name = &path.path.segments[0].ident;
+            if path_name != name {
+                return None;
+            }
+
+            // A capture can be used in an expression without carrying an explicit
+            // type annotation. Prefer the type imposed by the surrounding
+            // expression, but also use any known argument/local type when the
+            // capture name resolves to one of those bindings. This makes capture
+            // inference independent of the compiler's general expression_type()
+            // helper, which intentionally does not assign a type to captures.
+            expected
+                .cloned()
+                .or_else(|| {
+                    arguments
+                        .iter()
+                        .find(|argument| argument.name == *path_name)
+                        .map(|argument| argument.type_info.clone())
+                })
+                .or_else(|| {
+                    locals
+                        .iter()
+                        .rev()
+                        .find(|local| local.name == *path_name)
+                        .and_then(|local| local.type_info.clone())
+                })
         }
         Expr::Paren(paren) => infer_in_expr(&paren.expr, name, arguments, locals, expected),
         Expr::Binary(binary) => infer_binary(binary, name, arguments, locals, expected),
