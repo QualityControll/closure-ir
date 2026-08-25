@@ -1,57 +1,21 @@
 use proc_macro::TokenStream;
 
 mod call;
+mod captures;
 mod compile_closure;
 mod compile_type;
 mod parser;
 mod closure_pack;
-
 mod lowering;
 
-
-// ============================================================
-// CompileType
-// ============================================================
-
 #[proc_macro_derive(CompileType)]
-pub fn derive_closure_type(
-    input: TokenStream,
-) -> TokenStream {
-    compile_type::expand(input)
-}
-
-
-// ============================================================
-// closure_pack!
-// ============================================================
+pub fn derive_closure_type(input: TokenStream) -> TokenStream { compile_type::expand(input) }
 
 #[proc_macro]
-pub fn closure_pack(
-    input: TokenStream,
-) -> TokenStream {
-    closure_pack::expand(input)
-}
-
-
-// ============================================================
-// compile_closure!
-// ============================================================
+pub fn closure_pack(input: TokenStream) -> TokenStream { closure_pack::expand(input) }
 
 #[proc_macro]
-pub fn compile_closure(
-    input: TokenStream,
-) -> TokenStream {
-    compile_closure::expand(input)
-}
-
-
-// ============================================================
-// call!
-// ============================================================
+pub fn compile_closure(input: TokenStream) -> TokenStream { compile_closure::expand(input) }
 
 #[proc_macro]
-pub fn call(
-    input: TokenStream,
-) -> TokenStream {
-    call::expand(input)
-}
+pub fn call(input: TokenStream) -> TokenStream { call::expand(input) }
