@@ -30,7 +30,7 @@ Rust closure
      v
   closure IR
      |
-     +---- closure code representation
+     +---- MLIR
      |
      +---- captured state
      |
@@ -69,12 +69,11 @@ The current implementation explores whether Rust's compiler-visible syntax and p
 
 1. Accepts a normal Rust closure.
 2. Inspects its syntax at compile time using a procedural macro.
-3. Converts the closure into a language-independent IR.
-4. Uses generated type metadata to understand user-defined Rust types.
-5. Lowers the IR into MLIR.
-6. Uses MLIR's LLVM dialect and LLVM translation infrastructure to produce executable code.
-7. JIT-compiles and executes the resulting function.
-8. Eventually provides a representation that can be serialized independently of the original process.
+3. Uses generated type metadata to understand user-defined Rust types.
+4. Lowers the Closure into MLIR.
+5. Uses MLIR's LLVM dialect and LLVM translation infrastructure to produce executable code.
+6. JIT-compiles and executes the resulting function.
+7. Eventually provides a representation that can be serialized independently of the original process.
 
 ## Architecture
 
@@ -105,9 +104,7 @@ Rust closure
      ↓
 procedural macro
      ↓
-closure IR + type metadata
-     ↓
-MLIR
+MLIR + type metadata
      ↓
 LLVM dialect
      ↓
