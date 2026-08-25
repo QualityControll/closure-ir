@@ -7,12 +7,10 @@ pub struct CompiledClosure<'ctx, Args, Ret>{pub(crate) engine:ExecutionEngine,pu
 impl<'ctx,Args,Ret> CompiledClosure<'ctx,Args,Ret> where Args:CompileType,Ret:CompileType+'static{
  pub(crate) fn new(engine:ExecutionEngine,function_name:String)->Self{Self{engine,function_name,_marker:PhantomData,_context:PhantomData}}
  pub unsafe fn call(&self,value:&mut Args)->Ret{let mut result=MaybeUninit::<Ret>::uninit();
-  // invoke_packed expects a pointer to storage for each function argument.
-  // The MLIR function takes two `ptr` arguments, so the storage for each
-  // argument is itself a pointer-sized slot.
-  let mut args_ptr=value as *mut Args as *mut ();
-  let mut result_ptr=result.as_mut_ptr() as *mut ();
-  let mut packed=[&mut (args_ptr) as *mut *mut () as *mut (),&mut (result_ptr) as *mut *mut () as *mut ()];
+  // invoke_packed receives one pointer per MLIR function argument. The
+  // generated entry point takes pointers to the argument aggregate and
+  // result storage directly; do not add another level of indirection.
+  let mut packed=[value as *mut Args as *mut (),result.as_mut_ptr() as *mut ()];
   self.engine.invoke_packed(&self.function_name,&mut packed).expect("failed to invoke compiled closure");result.assume_init()}
 }
 
@@ -20,9 +18,7 @@ pub struct DynamicCompiledClosure<'ctx>{pub(crate) engine:ExecutionEngine,pub(cr
 impl<'ctx> DynamicCompiledClosure<'ctx>{
  pub(crate) fn new(engine:ExecutionEngine,function_name:String,arguments:Vec<TypeInfo>,return_type:TypeInfo)->Self{Self{engine,function_name,arguments,return_type,_context:PhantomData}}
  pub unsafe fn call(&self,values:&[Value])->Result<Value,String>{if values.len()!=self.arguments.len(){return Err(format!("expected {} arguments, got {}",self.arguments.len(),values.len()))}for(i,(v,t))in values.iter().zip(self.arguments.iter()).enumerate(){validate_value(i,v,t)?}let mut storage=Vec::with_capacity(values.len());let mut pointers=Vec::with_capacity(values.len());for v in values{let mut b=value_to_bytes(v)?;pointers.push(b.as_mut_ptr() as *mut ());storage.push(b);}let mut result=AlignedBuffer::new(value_size(&self.return_type)?,value_alignment(&self.return_type)?);
-  let mut args_data=pointers.as_mut_ptr() as *mut ();
-  let mut result_data=result.as_mut_ptr() as *mut ();
-  let mut args=[&mut args_data as *mut *mut () as *mut (),&mut result_data as *mut *mut () as *mut ()];
+  let mut args=[pointers.as_mut_ptr() as *mut (),result.as_mut_ptr() as *mut ()];
   self.engine.invoke_packed(&self.function_name,&mut args).map_err(|e|format!("failed to invoke dynamic JIT function: {:?}",e))?;std::hint::black_box(&storage);bytes_to_value(result.as_ptr(),&self.return_type)}
 }
 fn validate_value(index:usize,value:&Value,expected:&TypeInfo)->Result<(),String>{let valid=matches!((value,expected),(Value::Bool(_),TypeInfo::Bool)|(Value::I8(_),TypeInfo::I8)|(Value::I16(_),TypeInfo::I16)|(Value::I32(_),TypeInfo::I32)|(Value::I64(_),TypeInfo::I64)|(Value::I128(_),TypeInfo::I128)|(Value::U8(_),TypeInfo::U8)|(Value::U16(_),TypeInfo::U16)|(Value::U32(_),TypeInfo::U32)|(Value::U64(_),TypeInfo::U64)|(Value::U128(_),TypeInfo::U128)|(Value::Usize(_),TypeInfo::Usize)|(Value::F32(_),TypeInfo::F32)|(Value::F64(_),TypeInfo::F64));if valid{Ok(())}else{Err(format!("argument {} has type {:?}, expected {:?}",index,value,expected))}}
