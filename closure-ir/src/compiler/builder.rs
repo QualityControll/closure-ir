@@ -20,6 +20,7 @@ impl<'a> MlirBuilder<'a>{
  pub(crate) fn store(&mut self,v:&str,p:&str,t:&TypeInfo){self.text.push_str(&format!("    llvm.store {}, {} : {}, !llvm.ptr\n",v,p,Self::ty(t)));}
  pub(crate) fn gep_const(&mut self,p:&str,t:&TypeInfo,indices:&[usize])->String{let v=self.value();let idx=indices.iter().map(|i|i.to_string()).collect::<Vec<_>>().join(", ");self.text.push_str(&format!("    {} = llvm.getelementptr {}[{}] : (!llvm.ptr) -> !llvm.ptr, {}\n",v,p,idx,Self::ty(t)));v}
  pub(crate) fn gep_dynamic(&mut self,p:&str,t:&TypeInfo,idx:&str)->String{self.gep_raw(p,&Self::ty(t),idx)}
+ pub(crate) fn gep_array_dynamic(&mut self,p:&str,t:&TypeInfo,idx:&str)->String{let v=self.value();self.text.push_str(&format!("    {} = llvm.getelementptr {}[0, {}] : (!llvm.ptr, i64) -> !llvm.ptr, {}\n",v,p,idx,Self::ty(t)));v}
  pub(crate) fn gep_raw(&mut self,p:&str,elem_ty:&str,idx:&str)->String{let v=self.value();self.text.push_str(&format!("    {} = llvm.getelementptr {}[{}] : (!llvm.ptr, i64) -> !llvm.ptr, {}\n",v,p,idx,elem_ty));v}
  pub(crate) fn emit_branch(&mut self,target:&str){self.text.push_str(&format!("    llvm.br ^{}\n",target));self.current_terminated=true}
  pub(crate) fn emit_cond(&mut self,c:&str,t:&str,f:&str){self.text.push_str(&format!("    llvm.cond_br {}, ^{}, ^{}\n",c,t,f));self.current_terminated=true}
