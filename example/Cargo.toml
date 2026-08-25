@@ -15,8 +15,3 @@ path = "src/reciprocal.rs"
 closure-ir = {
     path = "../closure-ir"
 }
-
-inkwell = {
-    version = "0.10.0",
-    features = ["llvm22-1"]
-}
