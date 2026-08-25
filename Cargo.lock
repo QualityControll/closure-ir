@@ -83,17 +83,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "closure-ir"
+name = "closure-pack"
 version = "0.1.0"
 dependencies = [
- "closure-ir-macro",
+ "closure-pack-macro",
  "melior",
  "serde",
  "serde_json",
 ]
 
 [[package]]
-name = "closure-ir-macro"
+name = "closure-pack-macro"
 version = "0.1.0"
 dependencies = [
  "proc-macro2",
@@ -143,7 +143,7 @@ checksum = "b5320ae4c3782150d900b79807611a59a99fc9a1d61d686faafc24b93fc8d7ca"
 name = "example"
 version = "0.1.0"
 dependencies = [
- "closure-ir",
+ "closure-pack",
 ]
 
 [[package]]

@@ -1,4 +1,4 @@
-use closure_ir::{call, compile_closure};
+use closure_pack::{call, compile_closure};
 
 #[test] fn test_i8_to_i32() { let compiled = compile_closure!(|a: i8| -> i32 { a as i32 }); assert_eq!(call!(compiled, -7i8), -7); }
 #[test] fn test_u8_to_i64() { let compiled = compile_closure!(|a: u8| -> i64 { a as i64 }); assert_eq!(call!(compiled, 250u8), 250); }
